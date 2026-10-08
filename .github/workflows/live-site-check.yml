@@ -25,6 +25,7 @@ jobs:
     env:
       CI: "true"
       TRENDSCULPT_TEST_URL: https://trendsculpt.onrender.com
+      TRENDSCULPT_TEST_BROWSER: chrome
       PLAYWRIGHT_JSON_OUTPUT_FILE: /tmp/trendsculpt-live-report.json
     steps:
       - uses: actions/checkout@v4
@@ -37,7 +38,7 @@ jobs:
         working-directory: site
         run: |
           npm ci
-          npx playwright install --with-deps chromium
+          npx playwright install --with-deps chrome
       - name: Wait for the live application
         run: |
           python - <<'PY'
