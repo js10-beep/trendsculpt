@@ -100,6 +100,16 @@ export const test = base.extend({
           missingUpload: document.body.innerText.includes("Upload your image or video first."),
           hasAlert: !!document.querySelector('[role="alert"]'),
           invalidInputs: document.querySelectorAll("input:invalid").length,
+          invalidFields: Array.from(document.querySelectorAll<HTMLInputElement>("input:invalid")).map((input) => ({
+            label: input.closest("label")?.textContent?.trim(),
+            type: input.type,
+            length: input.value.length,
+            missing: input.validity.valueMissing,
+            typeMismatch: input.validity.typeMismatch,
+            tooShort: input.validity.tooShort,
+            tooLong: input.validity.tooLong,
+            patternMismatch: input.validity.patternMismatch,
+          })),
           recoveryPending: Array.from(document.querySelectorAll("button")).some((b) => b.textContent?.includes("Reset my password") && b.disabled),
         })).catch(() => null);
         if (diagnostics) console.log("LIVE_CHECK_UI " + JSON.stringify(diagnostics));

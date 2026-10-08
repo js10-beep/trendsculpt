@@ -52,7 +52,7 @@ def main():
                             elif line.startswith("LIVE_CHECK_UI "):
                                 try:
                                     state = json.loads(line.removeprefix("LIVE_CHECK_UI "))
-                                    states.append({k: state[k] for k in ["route", "processing", "mediaPreview", "unsupportedVideo", "missingUpload", "hasAlert", "invalidInputs", "recoveryPending"]})
+                                    states.append({k: state[k] for k in ["route", "processing", "mediaPreview", "unsupportedVideo", "missingUpload", "hasAlert", "invalidInputs", "invalidFields", "recoveryPending"]})
                                 except (ValueError, KeyError):
                                     pass
                         for error in result.get("errors", []):
