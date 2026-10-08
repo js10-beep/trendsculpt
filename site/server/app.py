@@ -1,11 +1,14 @@
 import pickle, csv
-import base64, hashlib, hmac, json, os, pathlib, re, secrets, sqlite3, time, uuid
+import base64, hashlib, hmac, json, os, pathlib, re, secrets, sqlite3, time, uuid, tempfile, threading, shutil
 from fastapi import FastAPI, Request, Response, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field, ValidationError
 from typing import Literal
+from starlette.concurrency import run_in_threadpool
+from fastapi.responses import JSONResponse
 from .datasets import train_private_csv
 from .analysis import analyze_content, inspect_media, MODELS
+from .content_review import LONG_FORM, parse_transcript
 from .storage import db, initialize, STORAGE
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -18,6 +21,7 @@ SECURE = (
     == "true"
 )
 MAX_BODY = 15 * 1024 * 1024
+VIDEO_SLOT = threading.BoundedSemaphore(1)
 
 
 initialize()
@@ -32,13 +36,24 @@ class BodyLimit:
         if scope["type"] != "http":
             return await self.app(scope, receive, send)
         length = 0
+        maximum = (
+            52 * 1024 * 1024 if scope.get("path") == "/api/analyze/video" else MAX_BODY
+        )
+        headers = dict(scope.get("headers", []))
+        if (
+            headers.get(b"content-length", b"0").isdigit()
+            and int(headers.get(b"content-length", b"0")) > maximum
+        ):
+            return await JSONResponse(
+                {"detail": "Upload exceeds the size limit."}, 413
+            )(scope, receive, send)
 
         async def bounded_receive():
             nonlocal length
             msg = await receive()
             length += len(msg.get("body", b""))
-            if length > MAX_BODY:
-                raise HTTPException(413, "Upload exceeds the 10 MB media limit.")
+            if length > maximum:
+                raise HTTPException(413, "Upload exceeds the size limit.")
             return msg
 
         await self.app(scope, bounded_receive, send)
@@ -187,6 +202,13 @@ def health():
         "auth": "server sessions",
         "emailDelivery": False,
         "storage": STORAGE,
+        "videoReview": {
+            "longForm": True,
+            "transcript": True,
+            "frameOCR": bool(shutil.which("tesseract")),
+            "maximumMinutes": 60,
+            "maximumLongFormMB": 50,
+        },
         "hostedStorage": STORAGE == "postgresql",
         "deploymentRevision": os.environ.get("RENDER_GIT_COMMIT", ""),
     }
@@ -303,6 +325,7 @@ async def update_profile(request: Request):
         raise HTTPException(400, "Name must have 1–80 characters.")
     if data.get("platform") not in [
         "Instagram",
+        "YouTube (long-form)",
         "YouTube Shorts",
         "TikTok",
         "LinkedIn",
@@ -349,9 +372,9 @@ async def delete_account(request: Request, response: Response):
 class Content(BaseModel):
     text: str = Field(default="", max_length=5000)
     type: Literal["Text", "Image", "Video"] = "Text"
-    platform: Literal["Instagram", "YouTube Shorts", "TikTok", "LinkedIn", "X"] = (
-        "Instagram"
-    )
+    platform: Literal[
+        "Instagram", "YouTube Shorts", "YouTube (long-form)", "TikTok", "LinkedIn", "X"
+    ] = "Instagram"
     objective: Literal["Reach", "Engagement", "Followers", "Leads", "Awareness"] = (
         "Engagement"
     )
@@ -361,6 +384,9 @@ class Content(BaseModel):
     media: str | None = Field(default=None, max_length=14 * 1024 * 1024)
     mediaName: str | None = Field(default=None, max_length=200)
     applied: bool = False
+    transcript: str = Field(default="", max_length=200000)
+    videoTitle: str = Field(default="", max_length=140)
+    sourceReportId: str | None = Field(default=None, max_length=40)
 
 
 def media_bytes(data, owner):
@@ -406,7 +432,7 @@ def media_bytes(data, owner):
             400, "The uploaded file does not match the selected content type."
         )
     try:
-        stats = inspect_media(raw, mime)
+        stats = inspect_media(raw, mime, data["platform"] == LONG_FORM)
     except Exception as e:
         if isinstance(e, ValueError):
             raise HTTPException(400, str(e))
@@ -416,26 +442,49 @@ def media_bytes(data, owner):
     return raw, mime, stats
 
 
-@app.post("/api/analyze")
-async def analysis(request: Request):
-    owner = session_user(request)
-    rate_limit(request, "analyze:" + owner["id"], 30)
-    try:
-        data = Content.model_validate(await json_object(request)).model_dump()
-    except (ValidationError, json.JSONDecodeError):
-        raise HTTPException(400, "Check your content fields and try again.")
-    if not data["text"].strip() and not data.get("media"):
-        raise HTTPException(400, "Add content or upload a file first.")
-    if data["type"] != "Text" and not data.get("media"):
-        raise HTTPException(400, "Upload media before analyzing.")
-    raw, mime, stats = media_bytes(data, owner["id"])
+def validate_content(data):
+    if not any(
+        str(data.get(k) or "").strip()
+        for k in ["text", "transcript", "media", "sourceReportId"]
+    ):
+        raise HTTPException(400, "Add content, a transcript or a video first.")
+    if (
+        data["type"] != "Text"
+        and not data.get("media")
+        and not data.get("sourceReportId")
+    ):
+        raise HTTPException(
+            400, "Upload media before analyzing, or select Text to review a transcript."
+        )
+    if data.get("transcript", "").strip():
+        try:
+            segments, _ = parse_transcript(data["transcript"])
+            if not segments or len(segments) > 5000:
+                raise ValueError(
+                    "Supply readable transcript words with at most 5,000 subtitle cues."
+                )
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+
+
+def complete_analysis(data, owner_id, raw, mime, stats):
+    if data.get("sourceReportId"):
+        with db() as c:
+            source = c.execute(
+                "SELECT report FROM reports WHERE id=? AND user_id=?",
+                (data["sourceReportId"], owner_id),
+            ).fetchone()
+        if not source:
+            raise HTTPException(404, "Source report not found in your account.")
+        if not stats:
+            stats = json.loads(source["report"]).get("mediaAnalysis")
     from datetime import datetime, timezone
 
     month = datetime.now(timezone.utc).strftime("%Y-%m")
     with db() as c:
         c.execute("BEGIN IMMEDIATE")
         usage = c.execute(
-            "SELECT count FROM usage WHERE user_id=? AND month=?", (owner["id"], month)
+            "SELECT count FROM usage WHERE user_id=? AND month=?", (owner_id, month)
         ).fetchone()
         if usage and usage["count"] >= 100:
             raise HTTPException(
@@ -444,11 +493,11 @@ async def analysis(request: Request):
             )
         c.execute(
             "INSERT INTO usage(user_id,month,count) VALUES(?,?,1) ON CONFLICT(user_id,month) DO UPDATE SET count=usage.count+1",
-            (owner["id"], month),
+            (owner_id, month),
         )
     with db() as c:
         private_rows = c.execute(
-            "SELECT platform,model FROM datasets WHERE user_id=?", (owner["id"],)
+            "SELECT platform,model FROM datasets WHERE user_id=?", (owner_id,)
         ).fetchall()
     private_models = {r["platform"]: pickle.loads(r["model"]) for r in private_rows}
     report = analyze_content(data, stats, private_models)
@@ -456,9 +505,105 @@ async def analysis(request: Request):
     with db() as c:
         c.execute(
             "INSERT INTO reports VALUES(?,?,?,?,?,?,?)",
-            (report["id"], owner["id"], json.dumps(report), 0, raw, mime, time.time()),
+            (report["id"], owner_id, json.dumps(report), 0, raw, mime, time.time()),
         )
     return report
+
+
+def process_content(data, owner_id):
+    acquired = False
+    try:
+        if data.get("media"):
+            acquired = VIDEO_SLOT.acquire(blocking=False)
+            if not acquired:
+                raise HTTPException(
+                    429, "Another media analysis is in progress. Try again shortly."
+                )
+        raw, mime, stats = media_bytes(data, owner_id)
+        if data["platform"] == LONG_FORM and data["type"] == "Video":
+            raw, mime = None, None
+        return complete_analysis(data, owner_id, raw, mime, stats)
+    finally:
+        if acquired:
+            VIDEO_SLOT.release()
+
+
+@app.post("/api/analyze")
+async def analysis(request: Request):
+    owner = session_user(request)
+    rate_limit(request, "analyze:" + owner["id"], 30)
+    try:
+        data = Content.model_validate(await json_object(request)).model_dump()
+    except ValidationError:
+        raise HTTPException(400, "Check your content fields and try again.")
+    validate_content(data)
+    return await run_in_threadpool(process_content, data, owner["id"])
+
+
+def process_upload(data, owner_id, path):
+    if not VIDEO_SLOT.acquire(blocking=False):
+        raise HTTPException(
+            429, "Another media analysis is in progress. Try again shortly."
+        )
+    try:
+        try:
+            stats = inspect_media(None, "video/mp4", long_form=True, path=path)
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        except Exception:
+            raise HTTPException(
+                400,
+                "This video could not be decoded within the processing budget. Try a compressed MP4 export or review its full transcript.",
+            )
+        data["media"] = None
+        report = complete_analysis(data, owner_id, None, None, stats)
+        return report
+    finally:
+        VIDEO_SLOT.release()
+
+
+@app.post("/api/analyze/video")
+async def uploaded_video(request: Request):
+    owner = session_user(request)
+    rate_limit(request, "analyze:" + owner["id"], 30)
+    async with request.form(
+        max_files=1, max_fields=1, max_part_size=1024 * 1024
+    ) as form:
+        upload = form.get("video")
+        if not upload or not hasattr(upload, "read"):
+            raise HTTPException(400, "Choose an MP4 video file.")
+        try:
+            data = Content.model_validate(
+                json.loads(form.get("payload", ""))
+            ).model_dump()
+        except (ValidationError, ValueError, TypeError):
+            raise HTTPException(400, "Check your video fields and try again.")
+        if data["platform"] != LONG_FORM or data["type"] != "Video":
+            raise HTTPException(
+                400, "Use the long-form YouTube video workflow for this upload."
+            )
+        data["media"] = "uploaded-video"
+        data["mediaName"] = pathlib.Path(upload.filename or "video.mp4").name[:200]
+        validate_content(data)
+        with tempfile.TemporaryDirectory(
+            prefix="trendsculpt-long-upload-"
+        ) as directory:
+            path = pathlib.Path(directory) / "video.mp4"
+            size = 0
+            with path.open("wb") as output:
+                while chunk := await upload.read(1024 * 1024):
+                    size += len(chunk)
+                    if size > 50 * 1024 * 1024:
+                        raise HTTPException(
+                            413,
+                            "Long-form uploads must be 50 MB or smaller. Compress the video or review its full transcript.",
+                        )
+                    output.write(chunk)
+            with path.open("rb") as handle:
+                signature = handle.read(12)
+            if len(signature) < 12 or signature[4:8] != b"ftyp":
+                raise HTTPException(400, "Upload a valid MP4 file.")
+            return await run_in_threadpool(process_upload, data, owner["id"], path)
 
 
 @app.get("/api/reports")

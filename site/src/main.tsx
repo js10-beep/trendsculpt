@@ -62,13 +62,32 @@ import {
   persistReport,
   removeReport,
   persistProfile,
+  runVideoAnalysis,
 } from "./store";
 import modelData from "./model-data.json";
 
 import "@fontsource-variable/dm-sans";
 import "@fontsource-variable/manrope";
 import "./styles.css";
-const platforms = ["Instagram", "YouTube Shorts", "TikTok", "LinkedIn", "X"];
+const platforms = [
+  "Instagram",
+  "YouTube Shorts",
+  "YouTube (long-form)",
+  "TikTok",
+  "LinkedIn",
+  "X",
+];
+const LONG_FORM = "YouTube (long-form)";
+const timeLabel = (seconds: number) => {
+  const n = Math.floor(seconds);
+  const ms = Math.round((seconds - n) * 1000);
+  const suffix = ms ? `.${String(ms).padStart(3, "0").replace(/0+$/, "")}` : "";
+  return (
+    (n >= 3600
+      ? `${Math.floor(n / 3600)}:${String(Math.floor(n / 60) % 60).padStart(2, "0")}:${String(n % 60).padStart(2, "0")}`
+      : `${Math.floor(n / 60)}:${String(n % 60).padStart(2, "0")}`) + suffix
+  );
+};
 const creators = [
   "Content Creator",
   "Influencer",
@@ -520,7 +539,7 @@ const FAQs = [
   ],
   [
     "What can I analyze?",
-    "Text, captions, images, and MP4 videos. The local pipeline measures exposure, contrast, resolution, and sampled video frames. Spoken-word transcription and semantic image understanding are not connected.",
+    "Text, captions, images, and MP4 videos. Video reviews use supplied transcripts or SRT/VTT subtitles, English on-screen text OCR, sampled frames and audio levels. Long-form YouTube supports videos up to 60 minutes / 50 MB, or full transcript reviews. Automatic speech transcription and visual-subject recognition are not connected.",
   ],
   [
     "Does it guarantee engagement?",
@@ -532,7 +551,7 @@ const FAQs = [
   ],
   [
     "Which platforms can I select?",
-    "Instagram, YouTube Shorts, TikTok, LinkedIn, and X. Platform selection adjusts caption-length preferences.",
+    "Instagram, YouTube Shorts, YouTube (long-form), TikTok, LinkedIn, and X. Long-form YouTube has a dedicated title, opening, chapter and closing review.",
   ],
   [
     "Is my content private?",
@@ -1599,6 +1618,20 @@ function AnalyzePage() {
   const [error, setError] = useState("");
   const [fileBusy, setFileBusy] = useState(false);
   const [drag, setDrag] = useState(false);
+  const [videoFile, setVideoFile] = useState<File | null>(null);
+  const objectURL = useRef("");
+  const longForm = input.platform === LONG_FORM;
+  useEffect(
+    () => () => {
+      if (objectURL.current) URL.revokeObjectURL(objectURL.current);
+    },
+    [],
+  );
+  const resetMedia = () => {
+    if (objectURL.current) URL.revokeObjectURL(objectURL.current);
+    objectURL.current = "";
+    setVideoFile(null);
+  };
   const phases = [
     "Reading your content",
     "Analyzing the hook",
@@ -1619,18 +1652,27 @@ function AnalyzePage() {
       setError("This file type isn’t supported. Try PNG, JPG, WEBP or MP4.");
       return;
     }
-    if (file.size > 10 * 1024 * 1024) {
-      setError("This file is too large. Maximum size is 10 MB.");
+    const longVideo = longForm && file.type === "video/mp4";
+    if (file.size > (longVideo ? 50 : 10) * 1024 * 1024) {
+      setError(
+        longVideo
+          ? "This video exceeds 50 MB. Use a compressed MP4 or analyze its full transcript."
+          : "This file is too large. Maximum size is 10 MB.",
+      );
       return;
     }
     setFileBusy(true);
+    let pendingURL = "";
     try {
-      const media = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(String(reader.result));
-        reader.onerror = () => reject(new Error("Could not read this file."));
-        reader.readAsDataURL(file);
-      });
+      const media = longVideo
+        ? (pendingURL = URL.createObjectURL(file))
+        : await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(String(reader.result));
+            reader.onerror = () =>
+              reject(new Error("Could not read this file."));
+            reader.readAsDataURL(file);
+          });
       const type = file.type.startsWith("video") ? "Video" : "Image";
       const meta = await new Promise<Partial<Input>>((resolve, reject) => {
         if (type === "Image") {
@@ -1644,9 +1686,16 @@ function AnalyzePage() {
           const video = document.createElement("video");
           video.preload = "metadata";
           video.onloadedmetadata = () => {
-            if (video.duration > 180 || !Number.isFinite(video.duration))
+            if (
+              video.duration > (longVideo ? 3600 : 180) ||
+              !Number.isFinite(video.duration)
+            )
               reject(
-                new Error("Please upload a short video of 3 minutes or less."),
+                new Error(
+                  longVideo
+                    ? "Long-form videos must be 60 minutes or less."
+                    : "Select YouTube (long-form) for videos longer than 3 minutes.",
+                ),
               );
             else
               resolve({
@@ -1656,12 +1705,23 @@ function AnalyzePage() {
               });
           };
           video.onerror = () =>
-            reject(new Error("This video cannot be played in this browser."));
+            longVideo
+              ? resolve({})
+              : reject(
+                  new Error("This video cannot be played in this browser."),
+                );
           video.src = media;
         }
       });
+      resetMedia();
+      if (longVideo) {
+        objectURL.current = media;
+        setVideoFile(file);
+      }
+      pendingURL = "";
       setInput((p) => ({ ...p, type, media, mediaName: file.name, ...meta }));
     } catch (e) {
+      if (pendingURL) URL.revokeObjectURL(pendingURL);
       setError(err(e));
     } finally {
       setFileBusy(false);
@@ -1677,10 +1737,17 @@ function AnalyzePage() {
     setBusy(true);
     const timer = setInterval(() => setPhase((p) => Math.min(p + 1, 4)), 350);
     try {
-      const r = await contentAnalysisService.analyze(input);
+      const r =
+        videoFile && longForm
+          ? await runVideoAnalysis(input, videoFile)
+          : await contentAnalysisService.analyze(input);
 
-      await refresh();
-      nav("/app/report/" + r.id, { state: { report: r } });
+      refresh().catch(() =>
+        toast(
+          "Your report is ready. Refresh the library if its count has not updated.",
+        ),
+      );
+      nav("/app/report/" + r.id);
     } catch (e) {
       setError(err(e));
     } finally {
@@ -1712,9 +1779,11 @@ function AnalyzePage() {
               return (
                 <button
                   type="button"
+                  disabled={busy || fileBusy}
                   key={String(t)}
                   className={input.type === t ? "active" : ""}
-                  onClick={() =>
+                  onClick={() => {
+                    resetMedia();
                     setInput((p) => ({
                       ...p,
                       type: String(t),
@@ -1723,8 +1792,8 @@ function AnalyzePage() {
                       mediaWidth: undefined,
                       mediaHeight: undefined,
                       duration: undefined,
-                    }))
-                  }
+                    }));
+                  }}
                 >
                   <Icon size={17} />
                   {String(t)}
@@ -1736,13 +1805,100 @@ function AnalyzePage() {
             Where will it live?
             <select
               value={input.platform}
-              onChange={(e) => change("platform", e.target.value)}
+              disabled={busy || fileBusy}
+              onChange={(e) => {
+                resetMedia();
+                setInput((p) => ({
+                  ...p,
+                  platform: e.target.value,
+                  media: undefined,
+                  mediaName: undefined,
+                  duration: undefined,
+                }));
+              }}
             >
               {platforms.map((p) => (
                 <option key={p}>{p}</option>
               ))}
             </select>
           </label>
+          {longForm && (
+            <div className="video-workflow-note">
+              <span className="eyebrow">LONG-FORM WORKSPACE</span>
+              <h3>A full explanation deserves its own review.</h3>
+              <p>
+                Upload an MP4 up to 60 minutes / 50 MB, or choose Text and
+                supply the full transcript. Reviews cover your title, opening,
+                actual sections and closing. Saved reports retain sampled frames
+                and feedback; full long-form videos are processed temporarily.
+              </p>
+            </div>
+          )}
+          {(longForm || input.type === "Video") && (
+            <>
+              <label>
+                Video title
+                <input
+                  value={input.videoTitle || ""}
+                  onChange={(e) => change("videoTitle", e.target.value)}
+                  maxLength={140}
+                  placeholder="The actual title or the title you plan to publish"
+                />
+              </label>
+              <label>
+                Transcript / subtitles (optional)
+                <textarea
+                  value={input.transcript || ""}
+                  onChange={(e) => change("transcript", e.target.value)}
+                  rows={6}
+                  maxLength={200000}
+                  placeholder="Paste the actual spoken words. SRT, WebVTT and timestamped transcripts are supported."
+                />
+              </label>
+              <label className="subtitle-upload">
+                Upload subtitles
+                <input
+                  type="file"
+                  accept=".srt,.vtt,.txt"
+                  aria-label="Upload subtitles"
+                  disabled={busy || fileBusy}
+                  onChange={async (e) => {
+                    const file = e.target.files?.[0];
+                    if (!file) return;
+                    if (
+                      file.size > 1024 * 1024 ||
+                      !/\.(srt|vtt|txt)$/i.test(file.name)
+                    ) {
+                      setError("Use an SRT, VTT or TXT file under 1 MB.");
+                      return;
+                    }
+                    setFileBusy(true);
+                    try {
+                      const words = await file.text();
+                      if (words.length > 200000)
+                        throw new Error(
+                          "Use at most 200,000 transcript characters.",
+                        );
+                      change("transcript", words);
+                      setError("");
+                      toast(
+                        "Subtitles loaded. Their actual words and timestamps will guide the review.",
+                      );
+                    } catch (e) {
+                      setError(err(e));
+                    } finally {
+                      setFileBusy(false);
+                    }
+                  }}
+                />
+              </label>
+              <p className="fine-print">
+                Transcripts are reviewed as supplied. English overlay text and
+                visual/audio measurements come from the file. The app does not
+                automatically transcribe speech or identify visual subjects.
+              </p>
+            </>
+          )}
           {input.type !== "Text" && (
             <>
               <div
@@ -1764,7 +1920,11 @@ function AnalyzePage() {
                     ? "Preparing preview…"
                     : "Drop your " + input.type.toLowerCase() + " here"}
                 </h4>
-                <p>PNG, JPG, WEBP or MP4 · Up to 10 MB</p>
+                <p>
+                  {longForm && input.type === "Video"
+                    ? "MP4 · Up to 50 MB / 60 minutes"
+                    : "PNG, JPG, WEBP or MP4 · Up to 10 MB"}
+                </p>
                 <label className="button secondary small">
                   Choose a file
                   <input
@@ -1789,14 +1949,17 @@ function AnalyzePage() {
                   )}
                   <div>
                     <span>
-                      {input.mediaName} · {input.mediaWidth} ×{" "}
-                      {input.mediaHeight}
+                      {input.mediaName}
+                      {input.mediaWidth
+                        ? ` · ${input.mediaWidth} × ${input.mediaHeight}`
+                        : " · Metadata will be checked on the server"}
                     </span>
                     <button
                       type="button"
                       className="icon-button"
                       aria-label="Remove uploaded media"
-                      onClick={() =>
+                      onClick={() => {
+                        resetMedia();
                         setInput((p) => ({
                           ...p,
                           media: undefined,
@@ -1804,8 +1967,8 @@ function AnalyzePage() {
                           mediaWidth: undefined,
                           mediaHeight: undefined,
                           duration: undefined,
-                        }))
-                      }
+                        }));
+                      }}
                     >
                       <X size={16} />
                     </button>
@@ -1816,7 +1979,9 @@ function AnalyzePage() {
           )}
           <label>
             {input.type === "Text"
-              ? "Caption or content"
+              ? longForm
+                ? "Video description / content context"
+                : "Caption or content"
               : "Caption / content context (optional)"}
             <textarea
               placeholder="What have you been working on? Add your caption, opening hook, or post idea…"
@@ -1824,7 +1989,7 @@ function AnalyzePage() {
               onChange={(e) => change("text", e.target.value)}
               maxLength={5000}
               rows={7}
-              required={input.type === "Text"}
+              required={input.type === "Text" && !input.transcript?.trim()}
             />
           </label>
           <div className="input-meta">
@@ -1971,6 +2136,7 @@ function ReportPage() {
   const [comparison, setComparison] = useState<Report | null>(null);
   const [busy, setBusy] = useState(false);
   const [media, setMedia] = useState(report?.media || "");
+  const [focusTime, setFocusTime] = useState<number | null>(null);
   const saved = reports.some((r) => r.id === report?.id);
   const [loading, setLoading] = useState(!initial);
   useEffect(() => {
@@ -1978,6 +2144,7 @@ function ReportPage() {
     setReport(initial);
     setVersion("");
     setComparison(null);
+    setFocusTime(null);
     if (!sample) {
       setLoading(true);
       reportFor(id)
@@ -2059,6 +2226,7 @@ function ReportPage() {
         ...report!,
         text: t,
         applied: true,
+        sourceReportId: report!.id,
       });
       setComparison(r);
       await refresh();
@@ -2121,7 +2289,11 @@ function ReportPage() {
       />
       <div className="report-top">
         <article className="card primary-score">
-          <span className="eyebrow">ENGAGEMENT POTENTIAL</span>
+          <span className="eyebrow">
+            {report.contentReview
+              ? "CONTENT REVIEW SCORE"
+              : "ENGAGEMENT POTENTIAL"}
+          </span>
           <div className="big-score">
             {report.overallScore}
             <span>/100</span>
@@ -2131,11 +2303,13 @@ function ReportPage() {
           </div>
           <span className="status">
             <span className="green-dot" />
-            {report.overallScore >= 75
-              ? "High engagement potential"
-              : report.overallScore >= 55
-                ? "Developing potential"
-                : "A starting point to sculpt"}
+            {report.contentReview
+              ? "Based on the available content evidence"
+              : report.overallScore >= 75
+                ? "High engagement potential"
+                : report.overallScore >= 55
+                  ? "Developing potential"
+                  : "A starting point to sculpt"}
           </span>
           <p>{disclaimer}</p>
         </article>
@@ -2159,6 +2333,12 @@ function ReportPage() {
         </article>
       </div>
       <EvidencePanel report={report} />
+      <VideoReview
+        key={report.id}
+        report={report}
+        focusTime={focusTime}
+        onCopy={copy}
+      />
       <div className="score-grid">
         {Object.entries(report.scores).map(([label, n]) => (
           <article className="card score-card" key={label}>
@@ -2191,8 +2371,37 @@ function ReportPage() {
             <div className="recommendation" key={r.title}>
               <span>0{i + 1}</span>
               <div>
+                {r.source && (
+                  <div className="recommendation-source">
+                    <span className="pill">
+                      {r.priority || "Medium"} priority · {r.source}
+                    </span>
+                    {r.timestamp != null && (
+                      <button
+                        className="text-button"
+                        onClick={() => {
+                          setFocusTime(r.timestamp!);
+                          document
+                            .getElementById("video-evidence")
+                            ?.scrollIntoView({
+                              behavior: "smooth",
+                              block: "start",
+                            });
+                        }}
+                      >
+                        {timeLabel(r.timestamp)} <ArrowUpRight size={13} />
+                      </button>
+                    )}
+                  </div>
+                )}
                 <h4>{r.title}</h4>
                 <p>{r.reason}</p>
+                {r.quote && (
+                  <div className="observed-quote">
+                    <span className="eyebrow">SOURCE WORDING</span>
+                    <p>“{r.quote}”</p>
+                  </div>
+                )}
                 <blockquote>{r.suggestion}</blockquote>
               </div>
             </div>
@@ -2214,6 +2423,12 @@ function ReportPage() {
         <div className="alternatives">
           <div className="card">
             <h3>Better hooks</h3>
+            {!report.hooks.length && (
+              <p>
+                Add a transcript or readable content context to generate wording
+                grounded in this video.
+              </p>
+            )}
             {report.hooks.map((t, i) => (
               <div className="alternative" key={t}>
                 <span className="eyebrow">OPTION 0{i + 1}</span>
@@ -2227,6 +2442,12 @@ function ReportPage() {
           </div>
           <div className="card">
             <h3>Caption directions</h3>
+            {!report.captions.length && (
+              <p>
+                Caption drafts become available when the report has supplied
+                words or readable overlay text.
+              </p>
+            )}
             {report.captions.map((t, i) => (
               <div className="alternative" key={t}>
                 <span className="eyebrow">VERSION 0{i + 1}</span>
@@ -2305,9 +2526,7 @@ function ReportPage() {
                   disabled={busy || sample}
                   onClick={async () => {
                     if (!(await save(comparison))) return;
-                    nav("/app/report/" + comparison.id, {
-                      state: { report: comparison },
-                    });
+                    nav("/app/report/" + comparison.id);
                   }}
                 >
                   Save revision
@@ -2688,6 +2907,189 @@ function EvidencePanel({ report }: { report: Report }) {
           </article>
         )}
       </div>
+    </section>
+  );
+}
+function VideoReview({
+  report,
+  focusTime,
+  onCopy,
+}: {
+  report: Report;
+  focusTime: number | null;
+  onCopy: (text: string) => void;
+}) {
+  const context = report.contentReview;
+  const timeline = report.mediaAnalysis?.timeline || [];
+  const [selected, setSelected] = useState(0);
+  useEffect(() => {
+    if (focusTime != null && timeline.length)
+      setSelected(
+        timeline.reduce(
+          (best, f, i) =>
+            Math.abs(f.timestamp - focusTime) <
+            Math.abs(timeline[best].timestamp - focusTime)
+              ? i
+              : best,
+          0,
+        ),
+      );
+  }, [focusTime]);
+  if (!context && !timeline.length) return null;
+  const frame = timeline[selected];
+  return (
+    <section className="video-review card" id="video-evidence">
+      <div className="card-heading">
+        <div>
+          <span className="eyebrow">FROM YOUR WORDS & YOUR FILE</span>
+          <h2>
+            {context?.longForm
+              ? "Your long-form review."
+              : "Your video, reviewed in context."}
+          </h2>
+        </div>
+        <span className="pill">
+          {context?.source || "Sampled video measurements"}
+        </span>
+      </div>
+      {context && (
+        <>
+          <p className="fine-print">{context.coverage}</p>
+          {!!context.keywords.length && (
+            <div className="review-keywords">
+              {context.keywords.map((word) => (
+                <span className="pill" key={word}>
+                  {word}
+                </span>
+              ))}
+            </div>
+          )}
+          {context.openingQuote && (
+            <div className="review-quotes">
+              <div>
+                <span className="eyebrow">OPENING IN THE SUPPLIED WORDS</span>
+                <p>“{context.openingQuote}”</p>
+              </div>
+              <div>
+                <span className="eyebrow">CLOSING IN THE SUPPLIED WORDS</span>
+                <p>“{context.closingQuote}”</p>
+              </div>
+            </div>
+          )}
+        </>
+      )}
+      {frame && (
+        <>
+          <div className="sample-controls" aria-label="Video timeline samples">
+            {timeline.map((f, i) => (
+              <button
+                key={f.timestamp}
+                className={i === selected ? "active" : ""}
+                onClick={() => setSelected(i)}
+                aria-label={`Inspect sample at ${timeLabel(f.timestamp)}`}
+                aria-pressed={i === selected}
+              >
+                {timeLabel(f.timestamp)}
+              </button>
+            ))}
+          </div>
+          <div className="sample-frame">
+            <img
+              src={frame.thumbnail}
+              alt={`Video sample at ${timeLabel(frame.timestamp)}`}
+            />
+            <div>
+              <span className="eyebrow">
+                ACTUAL FRAME · {timeLabel(frame.timestamp)}
+              </span>
+              <h3>
+                {frame.overlayText
+                  ? "Text estimated from this frame"
+                  : "A closer look at this moment"}
+              </h3>
+              <p>
+                {frame.overlayText ||
+                  (frame.ocrStatus === "completed"
+                    ? "No readable English overlay text was detected in this sample."
+                    : "Overlay text was not read for this sample. Inspect the preview or use your transcript for wording feedback.")}
+              </p>
+              <div className="sample-metrics">
+                <span>
+                  Luminance <b>{frame.brightness}/255</b>
+                </span>
+                <span>
+                  Contrast <b>{frame.contrast}</b>
+                </span>
+                <span>
+                  Clipped pixels <b>{frame.clippedPercent}%</b>
+                </span>
+              </div>
+              <p className="fine-print">
+                Compare this preview with the edit suggestion. Sparse frames do
+                not describe everything between samples.
+              </p>
+            </div>
+          </div>
+        </>
+      )}
+      {context?.longForm && (
+        <div className="long-form-structure">
+          <div className="card-heading">
+            <div>
+              <span className="eyebrow">A STARTING POINT FOR YOUR EDIT</span>
+              <h3>Chapter draft from your transcript</h3>
+            </div>
+            {!!context.chapters.length && (
+              <button
+                className="text-button"
+                onClick={() =>
+                  onCopy(
+                    context.chapters
+                      .map(
+                        (c, i) =>
+                          `${c.timestamp == null ? `Section ${i + 1}` : timeLabel(c.timestamp)} ${c.title}`,
+                      )
+                      .join("\n"),
+                  )
+                }
+              >
+                <Copy size={15} />
+                Copy chapter draft
+              </button>
+            )}
+          </div>
+          {context.chapters.length ? (
+            <ol className="chapter-list">
+              {context.chapters.map((c, i) => (
+                <li key={i}>
+                  <span>
+                    {c.timestamp == null
+                      ? `Section ${i + 1}`
+                      : timeLabel(c.timestamp)}
+                  </span>
+                  <p>{c.title}</p>
+                </li>
+              ))}
+            </ol>
+          ) : (
+            <p>
+              Add the full transcript or subtitles to review the sequence and
+              draft chapters.
+            </p>
+          )}
+          <p className="fine-print">
+            Review these boundaries before publishing. YouTube chapters start at
+            0:00, need at least 3 chapters and each must be at least 10 seconds.
+            Untimed text produces section ideas, not invented timestamps.
+          </p>
+        </div>
+      )}
+      {context?.longForm && timeline.length > 0 && !report.media && (
+        <p className="fine-print">
+          Your saved report contains these sampled frames and the review. The
+          full long-form upload was processed temporarily.
+        </p>
+      )}
     </section>
   );
 }

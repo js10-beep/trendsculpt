@@ -13,11 +13,18 @@ export type Input = {
   mediaWidth?: number;
   mediaHeight?: number;
   duration?: number;
+  transcript?: string;
+  videoTitle?: string;
+  sourceReportId?: string;
 };
 export type Recommendation = {
   title: string;
   reason: string;
   suggestion: string;
+  timestamp?: number | null;
+  quote?: string | null;
+  source?: string;
+  priority?: string;
 };
 export type Report = Input & {
   id: string;
@@ -34,6 +41,19 @@ export type Report = Input & {
   applied: boolean;
   sample?: boolean;
   provider?: string;
+  contentReview?: {
+    source: string;
+    hasTranscript: boolean;
+    timedSegments: number;
+    passages: number;
+    keywords: string[];
+    topic: string;
+    openingQuote: string;
+    closingQuote: string;
+    longForm: boolean;
+    chapters: { timestamp: number | null; title: string; source: string }[];
+    coverage: string;
+  } | null;
   evidence?: {
     platform: string;
     method: string;
@@ -66,6 +86,22 @@ export type Report = Input & {
     meanFrameChange: number;
     method: string;
     limits: string;
+    timeline?: {
+      timestamp: number;
+      thumbnail: string;
+      brightness: number;
+      contrast: number;
+      clippedPercent: number;
+      overlayText: string;
+      ocrStatus?: string;
+    }[];
+    audioWindows?: {
+      timestamp: number;
+      duration: number;
+      meanDb: number | null;
+      peakDb: number | null;
+    }[];
+    ocrAvailable?: boolean;
   } | null;
 };
 const bounded = (x: number) => Math.min(96, Math.max(18, Math.round(x)));

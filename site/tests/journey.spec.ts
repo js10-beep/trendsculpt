@@ -26,8 +26,9 @@ async function signup(page: Page, name: string) {
   return { email, code };
 }
 async function logout(page: Page) {
-  const response = page.waitForResponse((r) =>
-    r.url().endsWith("/api/auth/logout") && r.request().method() === "POST",
+  const response = page.waitForResponse(
+    (r) =>
+      r.url().endsWith("/api/auth/logout") && r.request().method() === "POST",
   );
   await page.getByRole("button", { name: /Free account/ }).click();
   expect((await response).status()).toBe(200);
@@ -79,9 +80,10 @@ test("secure creator journey persists and deletes with password confirmation", a
   await page.getByRole("button", { name: "Use this version" }).first().click();
   await expect(page.getByText(/Model estimate/)).toBeVisible();
   const originalURL = page.url();
-  const revisionSaved = page.waitForResponse((r) =>
-    /\/api\/reports\/[^/]+\/save$/.test(r.url()) &&
-    r.request().method() === "POST",
+  const revisionSaved = page.waitForResponse(
+    (r) =>
+      /\/api\/reports\/[^/]+\/save$/.test(r.url()) &&
+      r.request().method() === "POST",
   );
   await page.getByRole("button", { name: "Save revision" }).click();
   expect((await revisionSaved).status()).toBe(200);
@@ -138,7 +140,9 @@ test("password recovery uses one-time codes and supports a fresh login", async (
   const { email, code } = await signup(page, "Recovery Creator");
   await logout(page);
   await page.getByRole("link", { name: "Forgot password?" }).click();
-  await expect(page.getByRole("heading", { name: "Recover your account." })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Recover your account." }),
+  ).toBeVisible();
   await page.getByLabel("Email", { exact: true }).fill(email);
   await page.getByLabel("Recovery code", { exact: true }).fill(code);
   await page
@@ -147,11 +151,14 @@ test("password recovery uses one-time codes and supports a fresh login", async (
   await page
     .getByLabel("Confirm new password", { exact: true })
     .fill("New-creator-password-42");
-  expect(await page.locator("form").evaluate((form) =>
-    (form as HTMLFormElement).checkValidity(),
-  )).toBe(true);
-  const recovered = page.waitForResponse((r) =>
-    r.url().endsWith("/api/auth/recover") && r.request().method() === "POST",
+  expect(
+    await page
+      .locator("form")
+      .evaluate((form) => (form as HTMLFormElement).checkValidity()),
+  ).toBe(true);
+  const recovered = page.waitForResponse(
+    (r) =>
+      r.url().endsWith("/api/auth/recover") && r.request().method() === "POST",
     { timeout: 60000 },
   );
   await page.getByRole("button", { name: "Reset my password" }).click();
@@ -225,8 +232,8 @@ test("mobile navigation and actual image/video measurement work", async ({
     .getByLabel("Upload media")
     .setInputFiles("tests/fixtures/short.mp4");
   await expect(page.locator(".media-preview video")).toBeVisible();
-  const videoAnalysis = page.waitForResponse((r) =>
-    r.url().endsWith("/api/analyze") && r.request().method() === "POST",
+  const videoAnalysis = page.waitForResponse(
+    (r) => r.url().endsWith("/api/analyze") && r.request().method() === "POST",
     { timeout: 90000 },
   );
   await page.getByRole("button", { name: "Analyze my content" }).click();
@@ -268,6 +275,117 @@ test("brands can update preferences and train/delete a private dataset", async (
     .click();
   await expect(page.getByText("Instagram · 30 records")).toHaveCount(0);
 });
+test("long-form video uploads get grounded chapters and saved frame evidence", async ({
+  page,
+}) => {
+  await signup(page, "Longform Creator");
+  await page.getByRole("link", { name: "Analyze new content" }).click();
+  await page
+    .getByLabel("Where will it live?")
+    .selectOption("YouTube (long-form)");
+  await expect(
+    page.getByRole("heading", {
+      name: "A full explanation deserves its own review.",
+    }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Video", exact: true }).click();
+  await page
+    .getByLabel("Video title", { exact: true })
+    .fill("How to make a sourdough starter from flour and water");
+  await page
+    .getByLabel("Upload subtitles", { exact: true })
+    .setInputFiles("tests/fixtures/long-form.vtt");
+  await expect(
+    page.getByLabel("Transcript / subtitles (optional)"),
+  ).toHaveValue(/50 grams/);
+  await page
+    .getByLabel("Upload media")
+    .setInputFiles("tests/fixtures/long-form.mp4");
+  await expect(page.locator(".media-preview video")).toBeVisible();
+  const result = page.waitForResponse(
+    (r) =>
+      r.url().endsWith("/api/analyze/video") && r.request().method() === "POST",
+    { timeout: 90000 },
+  );
+  await page.getByRole("button", { name: "Analyze my content" }).click();
+  expect((await result).status()).toBe(200);
+  await expect(
+    page.getByRole("heading", { name: "Your long-form review." }),
+  ).toBeVisible();
+  await expect(page.locator(".chapter-list")).toContainText("50 grams");
+  await expect(page.locator(".recommendation").first()).toContainText(
+    "50 grams",
+  );
+  await page
+    .getByRole("button", { name: "Inspect sample at 0:00", exact: true })
+    .click();
+  await expect(
+    page.getByAltText("Video sample at 0:00", { exact: true }),
+  ).toBeVisible();
+  await expect(page.locator(".sample-frame")).toContainText(
+    "SOURDOUGH STARTER",
+  );
+  await page
+    .getByRole("button", { name: "Save analysis", exact: true })
+    .click();
+  await expect(
+    page.getByRole("button", { name: "Saved to library" }),
+  ).toBeDisabled();
+  await page.reload();
+  await expect(
+    page.getByRole("heading", { name: "Your long-form review." }),
+  ).toBeVisible();
+  await expect(
+    page.getByAltText("Video sample at 0:00", { exact: true }),
+  ).toBeVisible();
+  await page.screenshot({
+    path: "/tmp/trendsculpt-long-form-report.png",
+    fullPage: true,
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBeTruthy();
+});
+
+test("long-form transcript reviews reject bad timing and keep untimed chapters honest", async ({
+  page,
+}) => {
+  await signup(page, "Transcript Creator");
+  await page.getByRole("link", { name: "Analyze new content" }).click();
+  await page
+    .getByLabel("Where will it live?")
+    .selectOption("YouTube (long-form)");
+  await expect(
+    page.getByRole("heading", {
+      name: "A full explanation deserves its own review.",
+    }),
+  ).toBeVisible();
+  await page
+    .getByLabel("Video title", { exact: true })
+    .fill("How to grow basil on a balcony");
+  await page
+    .getByLabel("Transcript / subtitles (optional)")
+    .fill("WEBVTT\n00:10.000 --> 00:01.000\nBad cue");
+  await page.getByRole("button", { name: "Analyze my content" }).click();
+  await expect(page.getByRole("alert")).toContainText("timestamps");
+  await page
+    .getByLabel("Transcript / subtitles (optional)")
+    .fill(
+      "Hello everyone, welcome back.\n\nPlant basil in a pot with drainage holes and place it on your balcony.\n\nCheck the soil before watering the basil plant.\n\nTell me which basil variety you grow.",
+    );
+  await page.getByRole("button", { name: "Analyze my content" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Your long-form review." }),
+  ).toBeVisible();
+  await expect(page.locator(".chapter-list")).toContainText("Section 1");
+  await expect(page.locator(".chapter-list")).toContainText("basil");
+  await expect(page.getByText("Title clarity", { exact: true })).toBeVisible();
+  await expect(page.locator(".sample-controls")).toHaveCount(0);
+});
+
 test("public routes, source ledger and tablet layout stay usable", async ({
   page,
 }) => {
@@ -310,7 +428,17 @@ test("shared-browser history cannot reveal another account’s report", async ({
     page.getByRole("heading", { name: "Your content intelligence report." }),
   ).toBeVisible();
   const path = new URL(page.url()).pathname;
-  const report = await page.evaluate(() => window.history.state.usr.report);
+  const ownedReport = await page.request.get(
+    "/api/reports/" + path.split("/").at(-1),
+  );
+  expect(ownedReport.status()).toBe(200);
+  const report = await ownedReport.json();
+  expect(report.text).toBe(
+    "Private first creator content about growing tomatoes.",
+  );
+  expect(
+    await page.evaluate(() => window.history.state?.usr?.report),
+  ).toBeUndefined();
   await logout(page);
   await signup(page, "Second Creator");
   await page.evaluate(

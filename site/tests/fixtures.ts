@@ -17,11 +17,14 @@ export const test = base.extend({
     page.on("requestfailed", (request) => {
       const url = new URL(request.url());
       if (url.origin === origin && url.pathname.startsWith("/api/")) {
-        console.log("LIVE_CHECK_HTTP " + JSON.stringify({
-          method: request.method(),
-          path: url.pathname.replace(/[0-9a-f]{8}-[0-9a-f-]{27}/gi, ":id"),
-          status: 0,
-        }));
+        console.log(
+          "LIVE_CHECK_HTTP " +
+            JSON.stringify({
+              method: request.method(),
+              path: url.pathname.replace(/[0-9a-f]{8}-[0-9a-f-]{27}/gi, ":id"),
+              status: 0,
+            }),
+        );
       }
     });
     page.on("response", (response) => {
@@ -92,27 +95,43 @@ export const test = base.extend({
       await use(page);
     } finally {
       if (testInfo.status !== testInfo.expectedStatus && !page.isClosed()) {
-        const diagnostics = await page.evaluate(() => ({
-          route: location.pathname.replace(/[0-9a-f]{8}-[0-9a-f-]{27}/gi, ":id"),
-          processing: !!document.querySelector(".processing"),
-          mediaPreview: !!document.querySelector(".media-preview"),
-          unsupportedVideo: document.body.innerText.includes("This video cannot be played in this browser."),
-          missingUpload: document.body.innerText.includes("Upload your image or video first."),
-          hasAlert: !!document.querySelector('[role="alert"]'),
-          invalidInputs: document.querySelectorAll("input:invalid").length,
-          invalidFields: Array.from(document.querySelectorAll<HTMLInputElement>("input:invalid")).map((input) => ({
-            label: input.closest("label")?.textContent?.trim(),
-            type: input.type,
-            length: input.value.length,
-            missing: input.validity.valueMissing,
-            typeMismatch: input.validity.typeMismatch,
-            tooShort: input.validity.tooShort,
-            tooLong: input.validity.tooLong,
-            patternMismatch: input.validity.patternMismatch,
-          })),
-          recoveryPending: Array.from(document.querySelectorAll("button")).some((b) => b.textContent?.includes("Reset my password") && b.disabled),
-        })).catch(() => null);
-        if (diagnostics) console.log("LIVE_CHECK_UI " + JSON.stringify(diagnostics));
+        const diagnostics = await page
+          .evaluate(() => ({
+            route: location.pathname.replace(
+              /[0-9a-f]{8}-[0-9a-f-]{27}/gi,
+              ":id",
+            ),
+            processing: !!document.querySelector(".processing"),
+            mediaPreview: !!document.querySelector(".media-preview"),
+            unsupportedVideo: document.body.innerText.includes(
+              "This video cannot be played in this browser.",
+            ),
+            missingUpload: document.body.innerText.includes(
+              "Upload your image or video first.",
+            ),
+            hasAlert: !!document.querySelector('[role="alert"]'),
+            invalidInputs: document.querySelectorAll("input:invalid").length,
+            invalidFields: Array.from(
+              document.querySelectorAll<HTMLInputElement>("input:invalid"),
+            ).map((input) => ({
+              label: input.closest("label")?.textContent?.trim(),
+              type: input.type,
+              length: input.value.length,
+              missing: input.validity.valueMissing,
+              typeMismatch: input.validity.typeMismatch,
+              tooShort: input.validity.tooShort,
+              tooLong: input.validity.tooLong,
+              patternMismatch: input.validity.patternMismatch,
+            })),
+            recoveryPending: Array.from(
+              document.querySelectorAll("button"),
+            ).some(
+              (b) => b.textContent?.includes("Reset my password") && b.disabled,
+            ),
+          }))
+          .catch(() => null);
+        if (diagnostics)
+          console.log("LIVE_CHECK_UI " + JSON.stringify(diagnostics));
       }
       await Promise.all([...pending]);
       const failures: string[] = [];

@@ -14,9 +14,10 @@ export default defineConfig({
     channel: useChrome ? "chrome" : undefined,
     navigationTimeout: targetURL ? 60000 : 30000,
     launchOptions: {
-      executablePath: !useChrome && existsSync("/usr/bin/chromium")
-        ? "/usr/bin/chromium"
-        : undefined,
+      executablePath:
+        !useChrome && existsSync("/usr/bin/chromium")
+          ? "/usr/bin/chromium"
+          : undefined,
       args: ["--no-sandbox"],
     },
   },

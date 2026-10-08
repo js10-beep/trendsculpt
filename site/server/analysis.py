@@ -1,162 +1,34 @@
 import base64, io, json, math, pathlib, re, subprocess, tempfile, uuid
 from datetime import datetime, timezone
 import joblib, numpy as np
-from PIL import Image, ImageFilter, ImageStat
+from .media import inspect_media
+from .content_review import review_content, LONG_FORM
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 MODELS = joblib.load(ROOT / ".models/models.joblib")
 clamp = lambda n: max(15, min(96, round(float(n))))
 
 
-def inspect_frame(image):
-    image = image.convert("RGB")
-    width, height = image.size
-    image.thumbnail((320, 320))
-    gray = image.convert("L")
-    pixels = np.asarray(gray, dtype=float)
-    edges = np.asarray(gray.filter(ImageFilter.FIND_EDGES), dtype=float)
-    return {
-        "width": width,
-        "height": height,
-        "brightness": round(float(pixels.mean()), 1),
-        "contrast": round(float(pixels.std()), 1),
-        "edgeDetail": round(
-            float(edges[1:-1, 1:-1].mean()) if min(edges.shape) > 2 else 0, 1
-        ),
-        "clippedPercent": round(
-            float(((pixels < 12) | (pixels > 243)).mean() * 100), 1
-        ),
-        "fingerprint": np.asarray(gray.resize((32, 32)), dtype=float),
-    }
-
-
-def inspect_media(raw, mime):
-    frames = []
-    duration = None
-    has_audio = False
-    if mime.startswith("image/"):
-        with Image.open(io.BytesIO(raw)) as image:
-            if image.width * image.height > 30_000_000:
-                raise ValueError(
-                    "Image dimensions are too large. Use an image under 30 megapixels."
-                )
-            frames = [inspect_frame(image)]
-    else:
-        with tempfile.TemporaryDirectory(prefix="trendsculpt-video-") as directory:
-            path = pathlib.Path(directory) / "upload.mp4"
-            path.write_bytes(raw)
-            probe = subprocess.run(
-                [
-                    "ffprobe",
-                    "-protocol_whitelist",
-                    "file,pipe",
-                    "-v",
-                    "error",
-                    "-show_format",
-                    "-show_streams",
-                    "-of",
-                    "json",
-                    str(path),
-                ],
-                capture_output=True,
-                timeout=20,
-                check=True,
-            )
-            meta = json.loads(probe.stdout)
-            duration = float(meta.get("format", {}).get("duration", 0))
-            has_audio = any(s.get("codec_type") == "audio" for s in meta["streams"])
-            if not 0 < duration <= 180:
-                raise ValueError("Video must be 3 minutes or less.")
-            timestamps = sorted(
-                set(
-                    [
-                        0,
-                        min(0.5, duration / 3),
-                        min(1.5, duration * 0.5),
-                        min(3, duration * 0.7),
-                        min(6, duration * 0.85),
-                    ]
-                )
-            )
-            for timestamp in timestamps:
-                output = subprocess.run(
-                    [
-                        "ffmpeg",
-                        "-protocol_whitelist",
-                        "file,pipe",
-                        "-v",
-                        "error",
-                        "-ss",
-                        str(timestamp),
-                        "-i",
-                        str(path),
-                        "-frames:v",
-                        "1",
-                        "-vf",
-                        "scale=640:640:force_original_aspect_ratio=decrease",
-                        "-f",
-                        "image2pipe",
-                        "-vcodec",
-                        "png",
-                        "-threads",
-                        "1",
-                        "pipe:1",
-                    ],
-                    capture_output=True,
-                    timeout=25,
-                    check=True,
-                )
-                if output.stdout:
-                    with Image.open(io.BytesIO(output.stdout)) as image:
-                        frames.append(inspect_frame(image))
-            stream = next(
-                (s for s in meta["streams"] if s.get("codec_type") == "video"), None
-            )
-            if not stream or not frames:
-                raise ValueError("This video has no readable frames.")
-            for f in frames:
-                f["width"] = int(stream["width"])
-                f["height"] = int(stream["height"])
-    if not frames:
-        raise ValueError("Could not read uploaded media.")
-    changes = [
-        float(np.abs(a["fingerprint"] - b["fingerprint"]).mean())
-        for a, b in zip(frames, frames[1:])
-    ]
-    first = frames[0]
-    result = {
-        k: first[k]
-        for k in [
-            "width",
-            "height",
-            "brightness",
-            "contrast",
-            "edgeDetail",
-            "clippedPercent",
-        ]
-    }
-    result.update(
-        {
-            "framesSampled": len(frames),
-            "duration": duration,
-            "hasAudio": has_audio,
-            "meanFrameChange": round(float(np.mean(changes)), 1) if changes else 0,
-            "method": (
-                "Pillow pixel measurements"
-                if mime.startswith("image/")
-                else "FFmpeg sampled-frame measurements"
-            ),
-            "limits": "Measures exposure, contrast, resolution and frame changes; does not understand subjects, spoken words or semantic composition.",
-        }
-    )
-    return result
-
-
 def analyze_content(data, media_stats=None, private_models=None):
-    text = data["text"].strip()
+    review = (
+        review_content(data, media_stats)
+        if data["type"] == "Video" or data["platform"] == LONG_FORM
+        else None
+    )
+    text = (
+        (data.get("videoTitle", "") + "\n" + review["words"]).strip()
+        if review and review["words"]
+        else data["text"].strip()
+    )
     words = text.split()
-    first = re.split(r"[.!?\n]", text)[0]
-    topic = data["topic"].strip() or "your next post"
+    first = (
+        review["openingQuote"]
+        if review and review["openingQuote"]
+        else re.split(r"[.!?\n]", text)[0]
+    )
+    topic = data["topic"].strip() or (
+        review["topic"] if review and review["topic"] else "your next post"
+    )
     audience = data["audience"].strip()
     platform = data["platform"]
     has_cta = bool(
@@ -175,6 +47,8 @@ def analyze_content(data, media_stats=None, private_models=None):
     hashtags = re.findall(r"#[\w]+", text)
     ideal = 110 if platform == "LinkedIn" else 30 if platform == "X" else 65
     clarity = clamp(88 - abs(len(words) - ideal) * 0.3)
+    if review and review["longForm"]:
+        clarity = clamp(85 - max(0, len(words) / max(1, review["passages"]) - 30) * 0.5)
     hook = clamp(
         40
         + 20 * has_hook
@@ -253,11 +127,11 @@ def analyze_content(data, media_stats=None, private_models=None):
     model_key = (
         "Instagram"
         if platform == "Instagram"
-        else "YouTube" if platform == "YouTube Shorts" else None
+        else "YouTube" if platform in {"YouTube Shorts", LONG_FORM} else None
     )
     if model_key and text:
         model = (private_models or {}).get(model_key, MODELS[model_key])
-        query = model["vector"].transform([text + " " + topic])
+        query = model["vector"].transform([(text + " " + topic)[:16000]])
         similarities = (model["matrix"] @ query.T).toarray().ravel()
         indices = np.argsort(similarities)[::-1][:5]
         max_similarity = float(similarities[indices[0]])
@@ -308,7 +182,12 @@ def analyze_content(data, media_stats=None, private_models=None):
         quality = clamp(
             55
             + 15 * (m["width"] >= 720)
-            + 10 * (m["height"] >= m["width"])
+            + 10
+            * (
+                m["width"] >= m["height"]
+                if platform == LONG_FORM
+                else m["height"] >= m["width"]
+            )
             + 10 * (m["contrast"] >= 25)
             - 15 * (m["brightness"] < 40 or m["brightness"] > 225)
         )
@@ -392,6 +271,62 @@ def analyze_content(data, media_stats=None, private_models=None):
         "Share this with someone working on " + topic + ".",
         "Which detail matters most to you? Tell me below.",
     ]
+    if review:
+        recommendations = review["recommendations"]
+        if media_stats and media_stats["width"] < 720:
+            recommendations.append(
+                {
+                    "title": "Review the export resolution",
+                    "reason": f"The file measures {media_stats['width']} × {media_stats['height']} pixels.",
+                    "suggestion": (
+                        "Use a 1920 × 1080 landscape export when the source supports it."
+                        if review["longForm"]
+                        else "Use a 1080 × 1920 vertical export when the source supports it."
+                    ),
+                    "source": "Stream metadata",
+                    "priority": "Medium",
+                    "timestamp": None,
+                    "quote": None,
+                }
+            )
+        hooks = review["hooks"]
+        ctas = [review["cta"]] if review["words"] else []
+        captions = [
+            f"{h}\n\n{data['text'].strip()}\n\n{review['cta']}" for h in hooks[:2]
+        ]
+        if not review["words"]:
+            scores = {k: v for k, v in scores.items() if k == "Visual clarity"}
+            if not scores:
+                scores = {"Context completeness": 15}
+            strengths = (
+                ["Actual media measurements available"]
+                if media_stats
+                else ["Platform context supplied"]
+            )
+        elif review["longForm"]:
+            title_words = len(data.get("videoTitle", "").split())
+            scores.pop("Retention potential", None)
+            scores["Title clarity"] = (
+                clamp(82 - abs(title_words - 9) * 4) if title_words else 15
+            )
+            scores["Structure clarity"] = clamp(
+                45 + 5 * min(8, review["passages"]) + 12 * bool(review["timedSegments"])
+            )
+            scores.pop("Discoverability", None)
+            strengths = [
+                f"{review['passages']} supplied transcript passages reviewed",
+                "Dedicated long-form title and structure review",
+                "Source-labelled evidence for each edit",
+            ]
+        elif review["hasTranscript"]:
+            scores.pop("Retention potential", None)
+            scores["Structure clarity"] = clamp(55 + min(25, 5 * review["passages"]))
+            strengths = [
+                f"Feedback grounded in {review['source'].lower()}",
+                "Opening and closing words reviewed",
+                "Video samples available for inspection",
+            ]
+        recommendations.sort(key=lambda r: 0 if r.get("priority") == "High" else 1)
     overall = clamp(np.mean(list(scores.values())))
     summary = (
         f"Your {platform} {data['type'].lower()} has {'strong' if overall>=75 else 'developing'} potential in the content framework. The clearest next step is to {recommendations[0]['title'].lower()}. "
@@ -404,11 +339,18 @@ def analyze_content(data, media_stats=None, private_models=None):
     return {
         **data,
         "id": str(uuid.uuid4()),
-        "title": first[:85] or data.get("mediaName") or "Untitled content",
+        "title": data.get("videoTitle", "").strip()
+        or first[:85]
+        or data.get("mediaName")
+        or "Untitled content",
         "createdAt": datetime.now(timezone.utc).isoformat(),
         "overallScore": overall,
         "scores": scores,
-        "summary": summary,
+        "summary": (
+            f"{'Long-form YouTube' if review['longForm'] else 'Video'} review based on {review['source'].lower()}. {len(recommendations)} edit suggestions reference the supplied words and available video measurements. These are content checks, not a forecast of watch time or engagement."
+            if review
+            else summary
+        ),
         "strengths": strengths,
         "recommendations": recommendations,
         "hooks": hooks,
@@ -417,6 +359,15 @@ def analyze_content(data, media_stats=None, private_models=None):
         "applied": bool(data.get("applied", False)),
         "evidence": evidence,
         "mediaAnalysis": media_stats,
+        "contentReview": (
+            {
+                k: v
+                for k, v in review.items()
+                if k not in {"words", "recommendations", "hooks", "cta"}
+            }
+            if review
+            else None
+        ),
         "provider": (
             "Local dataset model + content framework"
             if evidence

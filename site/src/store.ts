@@ -15,7 +15,12 @@ export async function api<T>(
   const response = await fetch("/api" + path, {
     ...options,
     credentials: "same-origin",
-    headers: { "Content-Type": "application/json", ...options.headers },
+    headers: {
+      ...(options.body instanceof FormData
+        ? {}
+        : { "Content-Type": "application/json" }),
+      ...options.headers,
+    },
   });
   let body: any;
   try {
@@ -64,5 +69,11 @@ export const deleteAccount = (password: string) =>
   api("/account", { method: "DELETE", body: JSON.stringify({ password }) });
 export const runAnalysis = (input: Input) =>
   api<Report>("/analyze", { method: "POST", body: JSON.stringify(input) });
+export const runVideoAnalysis = (input: Input, video: File) => {
+  const body = new FormData();
+  body.append("payload", JSON.stringify({ ...input, media: undefined }));
+  body.append("video", video);
+  return api<Report>("/analyze/video", { method: "POST", body });
+};
 export const usageFor = () =>
   api<{ count: number; limit: number; month: string }>("/usage");

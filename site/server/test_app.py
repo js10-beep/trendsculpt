@@ -1,4 +1,4 @@
-import base64, io, os, pathlib, tempfile, unittest
+import base64, io, os, pathlib, tempfile, unittest, json
 from datetime import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import urlsplit
@@ -256,6 +256,98 @@ class WorkflowTests(unittest.TestCase):
             ).status_code,
             400,
         )
+
+    def test_transcript_feedback_is_specific_and_timestamped(self):
+        self.account(self.a)
+        subtitles = "WEBVTT\n\n00:00.000 --> 00:03.000\nHello everyone welcome back.\n\n00:40.000 --> 00:47.000\nMix 50 grams of flour with 50 grams of water for your sourdough starter.\n\n02:40.000 --> 02:45.000\nFeed the sourdough starter each morning."
+        sourdough = self.analyze(
+            self.a,
+            platform="YouTube (long-form)",
+            transcript=subtitles,
+            videoTitle="How to make a sourdough starter",
+            text="",
+        ).json()
+        gardening = self.analyze(
+            self.a,
+            platform="YouTube (long-form)",
+            transcript=subtitles.replace("sourdough starter", "basil plant").replace(
+                "flour", "potting soil"
+            ),
+            videoTitle="How to grow basil",
+            text="",
+        ).json()
+        self.assertNotEqual(sourdough["hooks"], gardening["hooks"])
+        self.assertIn("50 grams", " ".join(sourdough["hooks"]))
+        self.assertNotIn("your next post", str(sourdough["recommendations"]))
+        self.assertEqual(sourdough["contentReview"]["source"], "Timestamped subtitles")
+        self.assertTrue(sourdough["contentReview"]["longForm"])
+        self.assertEqual(sourdough["contentReview"]["chapters"][1]["timestamp"], 40)
+        self.assertIn("Title clarity", sourdough["scores"])
+        self.assertNotIn("Retention potential", sourdough["scores"])
+        bad = self.analyze(
+            self.a,
+            transcript="WEBVTT\n00:10.000 --> 00:01.000\nBad cue",
+            platform="YouTube (long-form)",
+        )
+        self.assertEqual(bad.status_code, 400)
+
+    def test_long_video_upload_is_sampled_private_and_keeps_original_ephemeral(self):
+        self.account(self.a)
+        self.account(self.b, "two@example.com")
+        video = (
+            pathlib.Path(__file__).resolve().parents[1] / "tests/fixtures/long-form.mp4"
+        ).read_bytes()
+        body = {
+            "type": "Video",
+            "platform": "YouTube (long-form)",
+            "videoTitle": "Sourdough starter explained",
+            "transcript": "0:00 Hello everyone welcome back.\n0:40 Mix 50 grams of flour with water.\n1:30 Feed your starter every day.\n3:00 Tell me which flour you use.",
+            "text": "",
+        }
+        response = self.a.post(
+            "/api/analyze/video",
+            data={"payload": json.dumps(body)},
+            files={"video": ("long.mp4", video, "video/mp4")},
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        report = response.json()
+        self.assertGreater(report["mediaAnalysis"]["duration"], 180)
+        self.assertGreater(len(report["mediaAnalysis"]["timeline"]), 7)
+        self.assertTrue(report["mediaAnalysis"]["hasAudio"])
+        self.assertGreater(len(report["mediaAnalysis"]["audioWindows"]), 0)
+        self.assertTrue(
+            any(
+                "SOURDOUGH" in f["overlayText"].upper()
+                for f in report["mediaAnalysis"]["timeline"]
+            )
+        )
+        self.assertIsNone(report["media"])
+        with db() as c:
+            row = c.execute(
+                "SELECT media FROM reports WHERE id=?", (report["id"],)
+            ).fetchone()
+        self.assertIsNone(row[0])
+        self.assertEqual(
+            self.a.post("/api/reports/" + report["id"] + "/save").status_code, 200
+        )
+        self.assertGreater(
+            len(
+                self.a.get("/api/reports/" + report["id"]).json()["mediaAnalysis"][
+                    "timeline"
+                ]
+            ),
+            7,
+        )
+        self.assertEqual(self.b.get("/api/reports/" + report["id"]).status_code, 404)
+        self.assertEqual(
+            self.analyze(self.b, sourceReportId=report["id"]).status_code, 404
+        )
+        invalid = self.a.post(
+            "/api/analyze/video",
+            data={"payload": json.dumps(body)},
+            files={"video": ("bad.mp4", b"not a video", "video/mp4")},
+        )
+        self.assertEqual(invalid.status_code, 400)
 
     def test_private_csv_training_is_scoped_and_can_be_deleted(self):
         self.account(self.a)

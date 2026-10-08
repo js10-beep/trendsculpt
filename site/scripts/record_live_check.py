@@ -51,8 +51,25 @@ def main():
                                     pass
                             elif line.startswith("LIVE_CHECK_UI "):
                                 try:
-                                    state = json.loads(line.removeprefix("LIVE_CHECK_UI "))
-                                    states.append({k: state[k] for k in ["route", "processing", "mediaPreview", "unsupportedVideo", "missingUpload", "hasAlert", "invalidInputs", "invalidFields", "recoveryPending"]})
+                                    state = json.loads(
+                                        line.removeprefix("LIVE_CHECK_UI ")
+                                    )
+                                    states.append(
+                                        {
+                                            k: state[k]
+                                            for k in [
+                                                "route",
+                                                "processing",
+                                                "mediaPreview",
+                                                "unsupportedVideo",
+                                                "missingUpload",
+                                                "hasAlert",
+                                                "invalidInputs",
+                                                "invalidFields",
+                                                "recoveryPending",
+                                            ]
+                                        }
+                                    )
                                 except (ValueError, KeyError):
                                     pass
                         for error in result.get("errors", []):
@@ -115,7 +132,7 @@ def main():
     visit(raw.get("suites", []))
     health_path = pathlib.Path("/tmp/trendsculpt-live-health.json")
     health = json.loads(health_path.read_text()) if health_path.exists() else {}
-    passed = len(tests) == 6 and all(
+    passed = len(tests) == 8 and all(
         t["status"] in {"expected", "flaky"} for t in tests
     )
     summary = {
@@ -125,7 +142,13 @@ def main():
         "passed": passed,
         "health": {
             k: health.get(k)
-            for k in ["ok", "storage", "hostedStorage", "emailDelivery", "deploymentRevision"]
+            for k in [
+                "ok",
+                "storage",
+                "hostedStorage",
+                "emailDelivery",
+                "deploymentRevision",
+            ]
         },
         "tests": tests,
         "runUrl": run_url,

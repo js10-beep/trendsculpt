@@ -1,10 +1,10 @@
 # TrendSculpt — creator & brand content intelligence
 
-This is the **new full-stack site** in `/workspace/trendsculpt/site`. The earlier browser-local demo in the parent directory remains separate. This version uses real password-protected server accounts, private durable storage, local trained models, and actual image/video measurements. Sites was unavailable in the session; no public site has been published.
+This is the **new full-stack site** in `/workspace/trendsculpt/site`. The earlier browser-local demo in the parent directory remains separate. This version uses real password-protected server accounts, private durable storage, local trained models, and actual image/video measurements. The live site is https://trendsculpt.onrender.com, deployed from the `codex/trendsculpt-site` branch with server-backed accounts and hosted PostgreSQL.
 
 ## Start the site
 
-Requires Node.js 22+, Python 3.12, FFmpeg, and FFprobe. Dependencies are pinned in `package-lock.json` and `server/requirements.lock.txt`.
+Requires Node.js 22+, Python 3.12, FFmpeg, FFprobe, and Tesseract OCR with English language data. The Dockerfile installs the media tools; Python dependencies include python-multipart for bounded streamed video uploads. Dependencies are pinned in `package-lock.json` and `server/requirements.lock.txt`.
 
 ```sh
 cd /workspace/trendsculpt/site
@@ -41,6 +41,18 @@ Start with Home → Get started → signup → save the recovery code → onboar
 - The free workspace allows **100 completed analysis requests per UTC calendar month**, enforced on the server. Saving an existing analysis does not consume another credit. Deleting reports does not reset usage. Revisions are new analyses.
 - Unsaved analyses are private server drafts and survive reload; they are not listed in the saved library until saved. Account deletion removes drafts too. Backups and operational retention must be configured by the deployment operator.
 
+## Video-specific feedback and long-form YouTube
+
+Choose **YouTube (long-form)** in Analyze content. Upload an MP4 up to **50 MB and 60 minutes**, or choose Text and provide the full transcript when the video is larger. Add the real video title and optionally the description/topic/audience. Paste spoken words or upload `.srt`, `.vtt` or `.txt` subtitles (at most 200,000 characters / 1 MB). Ordered timestamps are validated; malformed subtitles are rejected before consuming an analysis credit.
+
+Video feedback quotes the supplied opening, practical instructions and closing, with their available timestamps. It reviews repeated wording, dense subtitle timing, title/topic alignment, and proposes chapters from actual transcript passages. Untimed text produces section ideas without invented timestamps. Suggested rewrites reuse the creator's wording; they do not fabricate facts or automatically understand visual subjects. Frame OCR and transcript disagreement is a verification prompt, not a claim that subtitles are wrong.
+
+The visual timeline displays actual sampled frames and English OCR estimates, with exposure/contrast measurements. Audio advice cites measured short windows; an audio track is not proof of intelligible speech. Speech is **not automatically transcribed**. The user-supplied transcript may be inaccurate and is labelled accordingly. Long-form scores use a separate title/structure rubric and opening words, avoiding reel caption-length rules. They remain heuristic content review scores, not watch-time predictions.
+
+Long uploads are streamed to a temporary file and deleted after analysis. Saved reports retain their transcript, small frame previews, measurements and recommendations; the full long-form file is not stored in PostgreSQL. One media analysis is processed at a time per server worker, off the event loop, with a bounded processing budget. Highly demanding exports may need compression or transcript-only review. Short-form uploads retain the existing 10 MB / 3-minute limit. All saved samples and source-report reuse are authorized by their account owner.
+
+The live check runs eight browser journeys, including a real 190-second MP4 with audio/overlay text and subtitles, saved evidence across reload, and transcript-only long-form analysis. Reports are published without credentials on the separate `live-check-results` branch. Nine API tests additionally check transcript-specific rewrites, OCR, sampled audio, malformed timings, original-file disposal, and cross-account source access.
+
 ## What the analysis actually does
 
 `server/analysis.py` combines transparent caption/hook/CTA features with local **TF-IDF + ridge regression and similarity retrieval**. Platform matching and relevance/validation gates determine whether historical model evidence adjusts the engagement signal. The adjustment is capped at a 20% blend for that signal. TikTok, LinkedIn, and X currently use the content framework because no platform-specific training observations are bundled.
@@ -49,7 +61,7 @@ Start with Home → Get started → signup → save the recovery code → onboar
 - **YouTube:** 1,671 deduplicated observations across archived regional YouTube API exports from 2018; `(likes + comments) / views` as the target. This archive is **not a modern Shorts dataset**.
 - Validation uses a fixed 25% grouped holdout, keeping identical Instagram captions or YouTube channels out of both sides of the split. The Instagram model's mean absolute error is 1.208 percentage points versus a median-only baseline of 1.414. YouTube's is 3.041 versus 3.433. These are single offline split results, not a production accuracy guarantee.
 - Report evidence includes reference size, similarity, historical-pattern estimate, error-band heuristic, validation, and whether the model contributed to the score. The error band is **not a calibrated confidence interval**.
-- Pillow measures actual image exposure, contrast, clipped pixels, edge detail, and resolution. FFmpeg extracts up to five frames across the first seconds of uploaded video; FFprobe reads duration, dimensions, and audio-track presence. Uploaded MP4 signatures are validated, and media processing is restricted to local file/pipe protocols.
+- Pillow measures actual image exposure, contrast, clipped pixels, edge detail, and resolution. FFmpeg samples the opening, middle and ending of videos; FFprobe reads duration, dimensions, and audio-track presence. Selected frames receive English Tesseract OCR, and three short audio windows measure volume. Each sample has an inspectable preview and timestamp. Uploaded MP4 signatures are validated, and media processing is restricted to local file/pipe protocols.
 - The current pipeline does **not** understand visual subjects, transcribe speech, evaluate all video frames, or generate prose with a large language model. Caption/hook/CTA alternatives are dynamic templates grounded in the supplied topic and text. Paste your script/transcript for feedback on spoken hooks.
 - Scores and suggestions are guidance. They cannot establish causation or guarantee engagement, virality, retention, revenue, or real-world lifts.
 
@@ -92,7 +104,7 @@ docker run --rm -p 8000:8000 -v trendsculpt-data:/app/.data \
 
 For a managed proxy, pass Docker's standard proxy build arguments. If that proxy uses a platform-provided CA, supply its trusted public certificate bundle with `--secret id=environment_ca,src=/path/to/trusted-ca-bundle.crt`. The optional secret extends trust for npm, pip and checksum-verified dataset downloads during the build; it is not copied into the runtime image. Keep TLS verification enabled. This environment also required an explicit Docker `--add-host` mapping for its proxy hostname; use the environment's supported resolution rather than a hard-coded address.
 
-A public URL has not been created. Connect Sites or choose a hosting destination to publish the reviewed site. Publishing the **cloud environment snapshot** is separate from publishing this website.
+The public site is https://trendsculpt.onrender.com. Render automatically deploys the source branch; the live browser workflow waits for the exact deployment commit before checking it. Publishing the **cloud environment snapshot** is separate from publishing this website.
 
 ## Validation
 
@@ -103,12 +115,12 @@ npm test
 npm run test:e2e
 ```
 
-To exercise an already running compiled production server instead of starting Vite, set `TRENDSCULPT_TEST_URL` to that server's origin when running `npm run test:e2e`. The verified results were three analysis unit tests, seven server tests, and six browser journeys, with the browser suite passing on both development and the production container.
+To exercise an already running compiled production server instead of starting Vite, set `TRENDSCULPT_TEST_URL` to that server's origin when running `npm run test:e2e`. The current suite includes three analysis unit tests, nine server tests, and eight browser journeys, with the browser suite passing on both development and the production container.
 
 API tests use an isolated temporary database. Browser tests cover real signup/login, one-time recovery, persisted reports, comparisons, profile/preferences, private CSV training/deletion, image/video measurement, confirmed deletion, mobile/tablet layouts, public pages, and cross-account browser-history isolation. Chromium is selected automatically when installed; otherwise use Playwright's verified browser installation.
 
 Frontend architecture: reusable page/components in `src/main.tsx`, a typed API adapter in `src/store.ts`, sample-only scoring in `src/engine.ts`, and local font assets. Runtime scoring lives on the server. Backend modules separate authentication/storage, analysis/media processing, and private dataset training.
 
-PostgreSQL storage was exercised using a real, isolated local PostgreSQL 17 database: all seven API tests and six browser journeys passed. Accounts, sessions, saved reports, uploaded images and quotas also survived replacing the application process and its local data directory. The one-worker Docker image passed signup, actual video analysis, report saving and account deletion with a 512 MB memory limit; this is a bounded smoke test, not a capacity guarantee for larger workloads. To reproduce the PostgreSQL API checks, use `TRENDSCULPT_TEST_DATABASE_URL` with a loopback-only PostgreSQL database named `*_test` and run the server tests. The tests intentionally ignore a deployment's ordinary `DATABASE_URL` to avoid destroying real records. The adapter permits non-TLS connections only for an explicit loopback test; hosted connections always verify TLS. A live Neon connection remains unvalidated until you supply its URL in your hosting settings.
+PostgreSQL storage was exercised using a real, isolated local PostgreSQL 17 database: all seven API tests and six browser journeys passed. Accounts, sessions, saved reports, uploaded images and quotas also survived replacing the application process and its local data directory. The one-worker Docker image passed signup, actual video analysis, report saving and account deletion with a 512 MB memory limit; this is a bounded smoke test, not a capacity guarantee for larger workloads. To reproduce the PostgreSQL API checks, use `TRENDSCULPT_TEST_DATABASE_URL` with a loopback-only PostgreSQL database named `*_test` and run the server tests. The tests intentionally ignore a deployment's ordinary `DATABASE_URL` to avoid destroying real records. The adapter permits non-TLS connections only for an explicit loopback test; hosted connections always verify TLS. Live browser checks have exercised the configured hosted PostgreSQL connection. Its private connection URL stays in Render environment settings.
 
 Each cloud task already runs in an isolated environment. Use the existing checkout and this `site` directory; do not create worktrees unless explicitly requested. Preserve private data and user changes when refreshing setup.
