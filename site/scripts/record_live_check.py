@@ -31,6 +31,7 @@ def main():
             for spec in suite.get("specs", []):
                 for test in spec.get("tests", []):
                     requests = []
+                    errors = []
                     for result in test.get("results", []):
                         for item in result.get("stdout", []):
                             line = item.get("text", "").strip()
@@ -47,6 +48,48 @@ def main():
                                     )
                                 except (ValueError, KeyError):
                                     pass
+                        for error in result.get("errors", []):
+                            message = re.sub(
+                                r"\x1b\[[0-9;]*m", "", error.get("message", "")
+                            )
+                            lines = message.splitlines()
+                            safe_lines = [lines[0]] if lines else []
+                            safe_lines.extend(
+                                line
+                                for line in lines[1:]
+                                if line.lstrip().startswith(
+                                    (
+                                        "Locator:",
+                                        "- waiting",
+                                        "- taking",
+                                        "- screenshot",
+                                        "- fonts",
+                                        "- scrolling",
+                                        "- checking",
+                                    )
+                                )
+                            )
+                            safe = "\n".join(safe_lines[:12])
+                            safe = re.sub(
+                                r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}",
+                                "[test-email]",
+                                safe,
+                            )
+                            safe = re.sub(
+                                r"[0-9a-f]{8}-[0-9a-f-]{27}",
+                                "[test-id]",
+                                safe,
+                                flags=re.I,
+                            )
+                            safe = re.sub(r"[A-Za-z0-9_-]{30,}", "[redacted]", safe)
+                            for password in [
+                                "Creator-test-password-42",
+                                "New-creator-password-42",
+                            ]:
+                                safe = safe.replace(password, "[test-password]")
+                            errors.append(
+                                {"message": safe, "location": error.get("location")}
+                            )
                     tests.append(
                         {
                             "name": spec["title"],
@@ -56,6 +99,7 @@ def main():
                                 r.get("duration", 0) for r in test.get("results", [])
                             ),
                             "httpResponses": requests,
+                            "errors": errors,
                         }
                     )
             visit(suite.get("suites", []))
