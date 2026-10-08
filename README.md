@@ -1,15 +1,15 @@
 # TrendSculpt live check
 
-Status: FAIL
+Status: PASS
 
-[Workflow details](https://github.com/js10-beep/trendsculpt/actions/runs/37785599719)
+[Workflow details](https://github.com/js10-beep/trendsculpt/actions/runs/37786285810)
 
 Target: https://trendsculpt.onrender.com
 
 | Journey | Result |
 |---|---|
 | secure creator journey persists and deletes with password confirmation | expected |
-| password recovery uses one-time codes and supports a fresh login | unexpected |
+| password recovery uses one-time codes and supports a fresh login | expected |
 | mobile navigation and actual image/video measurement work | expected |
 | brands can update preferences and train/delete a private dataset | expected |
 | public routes, source ledger and tablet layout stay usable | expected |
