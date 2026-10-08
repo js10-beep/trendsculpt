@@ -1,18 +1,14 @@
 import pickle, csv
 import base64, hashlib, hmac, json, os, pathlib, re, secrets, sqlite3, time, uuid
-from contextlib import contextmanager
 from fastapi import FastAPI, Request, Response, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field, ValidationError
 from typing import Literal
 from .datasets import train_private_csv
 from .analysis import analyze_content, inspect_media, MODELS
+from .storage import db, initialize, STORAGE
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-DATA = pathlib.Path(os.environ.get("TRENDSCULPT_DATA_DIR", str(ROOT / ".data")))
-DATA.mkdir(parents=True, exist_ok=True)
-os.chmod(DATA, 0o700)
-DATABASE = DATA / "app.sqlite"
 COOKIE = "ts_session"
 SECURE = (
     os.environ.get(
@@ -24,32 +20,7 @@ SECURE = (
 MAX_BODY = 15 * 1024 * 1024
 
 
-@contextmanager
-def db():
-    conn = sqlite3.connect(DATABASE, timeout=30)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys=ON")
-    try:
-        yield conn
-        conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        conn.close()
-
-
-with db() as c:
-    c.executescript("""PRAGMA journal_mode=WAL;
- CREATE TABLE IF NOT EXISTS users(id TEXT PRIMARY KEY,email TEXT UNIQUE NOT NULL,name TEXT NOT NULL,password TEXT NOT NULL,recovery TEXT NOT NULL,profile TEXT NOT NULL,created REAL NOT NULL);
- CREATE TABLE IF NOT EXISTS sessions(hash TEXT PRIMARY KEY,user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,expires REAL NOT NULL);
- CREATE TABLE IF NOT EXISTS reports(id TEXT PRIMARY KEY,user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,report TEXT NOT NULL,saved INTEGER NOT NULL DEFAULT 0,media BLOB,mime TEXT,created REAL NOT NULL);
- CREATE TABLE IF NOT EXISTS datasets(user_id TEXT REFERENCES users(id) ON DELETE CASCADE,platform TEXT,model BLOB NOT NULL,info TEXT NOT NULL,PRIMARY KEY(user_id,platform));
- CREATE INDEX IF NOT EXISTS own_reports ON reports(user_id,saved,created);
- CREATE TABLE IF NOT EXISTS usage(user_id TEXT REFERENCES users(id) ON DELETE CASCADE,month TEXT,count INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(user_id,month));
- CREATE TABLE IF NOT EXISTS attempts(key TEXT,created REAL);
- CREATE INDEX IF NOT EXISTS recent_attempts ON attempts(key,created);""")
-os.chmod(DATABASE, 0o600)
+initialize()
 app = FastAPI(title="TrendSculpt", docs_url=None, redoc_url=None)
 
 
@@ -215,6 +186,8 @@ def health():
         "models": [{**v["info"]} for v in MODELS.values()],
         "auth": "server sessions",
         "emailDelivery": False,
+        "storage": STORAGE,
+        "hostedStorage": STORAGE == "postgresql",
     }
 
 
@@ -469,7 +442,7 @@ async def analysis(request: Request):
                 "Your free workspace includes 100 analyses per month. Try again next month.",
             )
         c.execute(
-            "INSERT INTO usage(user_id,month,count) VALUES(?,?,1) ON CONFLICT(user_id,month) DO UPDATE SET count=count+1",
+            "INSERT INTO usage(user_id,month,count) VALUES(?,?,1) ON CONFLICT(user_id,month) DO UPDATE SET count=usage.count+1",
             (owner["id"], month),
         )
     with db() as c:

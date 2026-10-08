@@ -17,6 +17,16 @@ npm run dev
 
 Development serves the website on port **5174** and its API on port **8000**. The Vite proxy keeps browser API requests on the same origin. The startup script uses the local virtual environment when available. It stops both processes together and watches backend source changes.
 
+## Hosting without a paid plan
+
+On Render, choose a **Free Web Service**, branch `codex/trendsculpt-site`, root directory `site`, Dockerfile `./Dockerfile`, build context `.`, region Singapore if appropriate for your users, and health check `/api/health`. Leave Docker/start command overrides empty and do not add a disk. Use `PORT=8000`, `COOKIE_SECURE=true`, and `SITE_ORIGIN` set to the exact Render HTTPS origin without a trailing slash. The image defaults to one worker to reduce memory use; optional `WEB_CONCURRENCY=1` makes this explicit.
+
+Render's free filesystem is temporary. Without a hosted database, login, analysis and deletion work, but accounts, reports, uploads and private models can disappear when the instance is replaced or redeployed. Free instances can sleep after inactivity, making the first visit slower.
+
+For saved accounts and reports without a paid Render disk, create a **free PostgreSQL project on [Neon](https://neon.tech)** and copy its connection string into Render's private `DATABASE_URL` environment variable. Keep this URL out of chat, GitHub and frontend variables. Save and redeploy. The app creates its schema automatically and stores users, sessions, reports, uploaded media, quotas and private dataset models in PostgreSQL. Outgoing database connections require TLS certificate and hostname verification. `/api/health` reports `storage: postgresql` when enabled; it never returns credentials.
+
+Neon and Render free-tier usage/storage limits apply. No Neon project is connected by this code change; you create the free project and configure its URL yourself. Switching an existing SQLite deployment to PostgreSQL starts a separate database; existing SQLite records are not automatically migrated. SQLite remains the default for local development.
+
 Start with Home → Get started → signup → save the recovery code → onboarding → analysis → report → compare → save → library. Creator, Brand, and Agency preferences are supported. Individual reports, private datasets, and the entire account can be deleted. Account deletion requires the current password.
 
 ## Functional accounts and storage
@@ -26,7 +36,7 @@ Start with Home → Get started → signup → save the recovery code → onboar
 - Login, remember-me, logout, profile/preferences, private reports/media, recovery, deletion, and the monthly quota are server-backed.
 - Password recovery uses a **one-time recovery code shown at signup**. Resetting rotates that code and revokes all sessions. Store the replacement code safely.
 - Email verification, password-reset email delivery, and notification delivery are **not configured**. The UI does not claim to send them. Email addresses are login identifiers, not verified inbox ownership.
-- SQLite, private uploaded media, and private dataset models live in ignored `.data/app.sqlite`. Keep this directory on durable storage. Model artifacts live separately in ignored `.models`, so mounting a fresh data volume does not hide the bundled model.
+- By default, SQLite, private uploaded media, and private dataset models live in ignored `.data/app.sqlite`. Keep this directory on durable storage for a SQLite deployment. When `DATABASE_URL` is configured, all those records are stored in hosted PostgreSQL instead. Model artifacts live separately in ignored `.models`, so mounting a fresh data volume does not hide the bundled model.
 - User content is not kept in localStorage or sessionStorage. Server authorization filters every private operation by its authenticated owner; client-side scores are not trusted.
 - The free workspace allows **100 completed analysis requests per UTC calendar month**, enforced on the server. Saving an existing analysis does not consume another credit. Deleting reports does not reset usage. Revisions are new analyses.
 - Unsaved analyses are private server drafts and survive reload; they are not listed in the saved library until saved. Account deletion removes drafts too. Backups and operational retention must be configured by the deployment operator.
@@ -70,7 +80,7 @@ npm run build
 .venv/bin/python -m uvicorn server.app:app --host 0.0.0.0 --port 8000
 ```
 
-The Python server serves the compiled frontend, private API, and client-side routes from one origin. A static-only host is insufficient for accounts, persistence, and analysis. Configure an HTTPS domain, `SITE_ORIGIN=https://your-domain`, `COOKIE_SECURE=true`, and durable `.data` storage. `.env.example` documents variables; the application expects deployment environment injection rather than loading that example automatically. Use a single host/durable volume for SQLite; moving to multiple independent servers requires a shared database/auth/storage architecture.
+The Python server serves the compiled frontend, private API, and client-side routes from one origin. A static-only host is insufficient for accounts, persistence, and analysis. Configure an HTTPS domain, `SITE_ORIGIN=https://your-domain`, `COOKIE_SECURE=true`, and either hosted PostgreSQL via `DATABASE_URL` or durable `.data` storage for SQLite. `.env.example` documents variables; the application expects deployment environment injection rather than loading that example automatically. Use a single host/durable volume for SQLite. Docker starts `python -m server.start`, respecting `PORT` and `WEB_CONCURRENCY` (default one worker).
 
 A Dockerfile is supplied for a full-stack deployment. It builds the frontend, installs the pinned Python stack and FFmpeg, trains checksum-verified models, and runs as an unprivileged user. Its image build, all six browser journeys, and account/session/report/quota persistence across a container restart were validated in this environment. Configure the actual hosting domain, HTTPS and durable storage before publication.
 
@@ -98,5 +108,7 @@ To exercise an already running compiled production server instead of starting Vi
 API tests use an isolated temporary database. Browser tests cover real signup/login, one-time recovery, persisted reports, comparisons, profile/preferences, private CSV training/deletion, image/video measurement, confirmed deletion, mobile/tablet layouts, public pages, and cross-account browser-history isolation. Chromium is selected automatically when installed; otherwise use Playwright's verified browser installation.
 
 Frontend architecture: reusable page/components in `src/main.tsx`, a typed API adapter in `src/store.ts`, sample-only scoring in `src/engine.ts`, and local font assets. Runtime scoring lives on the server. Backend modules separate authentication/storage, analysis/media processing, and private dataset training.
+
+PostgreSQL storage was exercised using a real, isolated local PostgreSQL 17 database: all seven API tests and six browser journeys passed. Accounts, sessions, saved reports, uploaded images and quotas also survived replacing the application process and its local data directory. The one-worker Docker image passed signup, actual video analysis, report saving and account deletion with a 512 MB memory limit; this is a bounded smoke test, not a capacity guarantee for larger workloads. To reproduce the PostgreSQL API checks, use `TRENDSCULPT_TEST_DATABASE_URL` with a loopback-only PostgreSQL database named `*_test` and run the server tests. The tests intentionally ignore a deployment's ordinary `DATABASE_URL` to avoid destroying real records. The adapter permits non-TLS connections only for an explicit loopback test; hosted connections always verify TLS. A live Neon connection remains unvalidated until you supply its URL in your hosting settings.
 
 Each cloud task already runs in an isolated environment. Use the existing checkout and this `site` directory; do not create worktrees unless explicitly requested. Preserve private data and user changes when refreshing setup.

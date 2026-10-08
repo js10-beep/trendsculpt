@@ -1,7 +1,23 @@
 import base64, io, os, pathlib, tempfile, unittest
 from datetime import datetime, timezone
+from concurrent.futures import ThreadPoolExecutor
+from urllib.parse import urlsplit
 
 os.environ["TRENDSCULPT_DATA_DIR"] = tempfile.mkdtemp(prefix="trendsculpt-api-test-")
+test_url = os.environ.get("TRENDSCULPT_TEST_DATABASE_URL")
+if test_url:
+    parsed = urlsplit(test_url)
+    if parsed.hostname not in {
+        "localhost",
+        "127.0.0.1",
+        "::1",
+    } or not parsed.path.endswith("_test"):
+        raise RuntimeError("API tests require an isolated local database named *_test.")
+    os.environ["DATABASE_URL"] = test_url
+    os.environ["TRENDSCULPT_ALLOW_LOCAL_DATABASE"] = "true"
+else:
+    # Never point destructive fixtures at a real deployment's DATABASE_URL.
+    os.environ.pop("DATABASE_URL", None)
 from fastapi.testclient import TestClient
 from PIL import Image
 from .app import app, db, COOKIE
@@ -207,6 +223,14 @@ class WorkflowTests(unittest.TestCase):
         with db() as c:
             c.execute("UPDATE usage SET count=100 WHERE user_id=?", (a["user"]["id"],))
         self.assertEqual(self.analyze(self.a).status_code, 429)
+        with db() as c:
+            c.execute("UPDATE usage SET count=99 WHERE user_id=?", (a["user"]["id"],))
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            responses = list(
+                pool.map(lambda _: self.analyze(self.a).status_code, range(2))
+            )
+        self.assertEqual(sorted(responses), [200, 429])
+        self.assertEqual(self.a.get("/api/usage").json()["count"], 100)
 
     def test_real_local_models_and_decoded_video(self):
         self.account(self.a)

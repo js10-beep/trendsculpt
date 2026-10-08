@@ -27,4 +27,4 @@ RUN useradd --system --uid 10001 --create-home sculpt && chown -R sculpt:sculpt 
 USER sculpt
 VOLUME ["/app/.data"]
 EXPOSE 8000
-CMD ["python", "-m", "uvicorn", "server.app:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
+CMD ["python", "-m", "server.start"]
