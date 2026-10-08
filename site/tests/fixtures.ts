@@ -14,6 +14,16 @@ export const test = base.extend({
       process.env.TRENDSCULPT_TEST_URL || "http://127.0.0.1:5174",
     ).origin;
     let activeEmail: string | undefined;
+    page.on("requestfailed", (request) => {
+      const url = new URL(request.url());
+      if (url.origin === origin && url.pathname.startsWith("/api/")) {
+        console.log("LIVE_CHECK_HTTP " + JSON.stringify({
+          method: request.method(),
+          path: url.pathname.replace(/[0-9a-f]{8}-[0-9a-f-]{27}/gi, ":id"),
+          status: 0,
+        }));
+      }
+    });
     page.on("response", (response) => {
       const request = response.request();
       const url = new URL(request.url());
@@ -89,6 +99,8 @@ export const test = base.extend({
           unsupportedVideo: document.body.innerText.includes("This video cannot be played in this browser."),
           missingUpload: document.body.innerText.includes("Upload your image or video first."),
           hasAlert: !!document.querySelector('[role="alert"]'),
+          invalidInputs: document.querySelectorAll("input:invalid").length,
+          recoveryPending: Array.from(document.querySelectorAll("button")).some((b) => b.textContent?.includes("Reset my password") && b.disabled),
         })).catch(() => null);
         if (diagnostics) console.log("LIVE_CHECK_UI " + JSON.stringify(diagnostics));
       }

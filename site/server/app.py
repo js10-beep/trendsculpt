@@ -188,6 +188,7 @@ def health():
         "emailDelivery": False,
         "storage": STORAGE,
         "hostedStorage": STORAGE == "postgresql",
+        "deploymentRevision": os.environ.get("RENDER_GIT_COMMIT", ""),
     }
 
 

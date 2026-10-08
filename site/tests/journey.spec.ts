@@ -146,7 +146,15 @@ test("password recovery uses one-time codes and supports a fresh login", async (
   await page
     .getByLabel("Confirm new password", { exact: true })
     .fill("New-creator-password-42");
+  expect(await page.locator("form").evaluate((form) =>
+    (form as HTMLFormElement).checkValidity(),
+  )).toBe(true);
+  const recovered = page.waitForResponse((r) =>
+    r.url().endsWith("/api/auth/recover") && r.request().method() === "POST",
+    { timeout: 60000 },
+  );
   await page.getByRole("button", { name: "Reset my password" }).click();
+  expect((await recovered).status()).toBe(200);
   await expect(
     page.getByRole("heading", { name: "Your account recovery code." }),
   ).toBeVisible();

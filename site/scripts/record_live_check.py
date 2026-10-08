@@ -52,7 +52,7 @@ def main():
                             elif line.startswith("LIVE_CHECK_UI "):
                                 try:
                                     state = json.loads(line.removeprefix("LIVE_CHECK_UI "))
-                                    states.append({k: state[k] for k in ["route", "processing", "mediaPreview", "unsupportedVideo", "missingUpload", "hasAlert"]})
+                                    states.append({k: state[k] for k in ["route", "processing", "mediaPreview", "unsupportedVideo", "missingUpload", "hasAlert", "invalidInputs", "recoveryPending"]})
                                 except (ValueError, KeyError):
                                     pass
                         for error in result.get("errors", []):
@@ -125,7 +125,7 @@ def main():
         "passed": passed,
         "health": {
             k: health.get(k)
-            for k in ["ok", "storage", "hostedStorage", "emailDelivery"]
+            for k in ["ok", "storage", "hostedStorage", "emailDelivery", "deploymentRevision"]
         },
         "tests": tests,
         "runUrl": run_url,

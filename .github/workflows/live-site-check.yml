@@ -42,18 +42,18 @@ jobs:
       - name: Wait for the live application
         run: |
           python - <<'PY'
-          import json,time,urllib.request,pathlib
-          for attempt in range(12):
+          import json,time,urllib.request,pathlib,os
+          for attempt in range(60):
               try:
                   with urllib.request.urlopen('https://trendsculpt.onrender.com/api/health',timeout=30) as response:
                       health=json.load(response)
-                  if health.get('ok') and health.get('storage')=='postgresql' and health.get('hostedStorage') and health.get('emailDelivery') is False:
+                  if health.get('ok') and health.get('storage')=='postgresql' and health.get('hostedStorage') and health.get('emailDelivery') is False and health.get('deploymentRevision')==os.environ['GITHUB_SHA']:
                       pathlib.Path('/tmp/trendsculpt-live-health.json').write_text(json.dumps(health))
-                      print('Live application is ready with PostgreSQL and local models.')
+                      print('Current deployment is ready with PostgreSQL and local models.')
                       break
               except Exception:
                   pass
-              print('Waiting for the free application to wake up; attempt',attempt+1)
+              print('Waiting for the current deployment; attempt',attempt+1)
               time.sleep(5)
           else:
               raise SystemExit('Live application did not become ready with PostgreSQL and disabled email delivery.')
