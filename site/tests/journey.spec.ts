@@ -1,4 +1,4 @@
-import { test, expect, Page } from "@playwright/test";
+import { test, expect, Page } from "./fixtures";
 const password = "Creator-test-password-42";
 async function signup(page: Page, name: string) {
   await page.goto("/signup");
@@ -306,4 +306,11 @@ test("shared-browser history cannot reveal another account’s report", async ({
       exact: true,
     }),
   ).toHaveCount(0);
+  const otherReportId = path.split("/").at(-1);
+  expect(
+    (await page.request.get("/api/reports/" + otherReportId)).status(),
+  ).toBe(404);
+  expect(
+    (await page.request.delete("/api/reports/" + otherReportId)).status(),
+  ).toBe(404);
 });

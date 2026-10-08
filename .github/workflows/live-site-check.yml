@@ -1,0 +1,65 @@
+name: TrendSculpt live website check
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [codex/trendsculpt-site]
+    paths:
+      - .github/workflows/live-site-check.yml
+      - site/tests/**
+      - site/playwright.config.ts
+      - site/scripts/record_live_check.py
+
+permissions:
+  contents: write
+
+concurrency:
+  group: trendsculpt-live-website-check
+  cancel-in-progress: false
+
+jobs:
+  browser-check:
+    if: github.repository == 'js10-beep/trendsculpt'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CI: "true"
+      TRENDSCULPT_TEST_URL: https://trendsculpt.onrender.com
+      PLAYWRIGHT_JSON_OUTPUT_FILE: /tmp/trendsculpt-live-report.json
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: site/package-lock.json
+      - name: Install browser test dependencies
+        working-directory: site
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+      - name: Wait for the live application
+        run: |
+          python - <<'PY'
+          import json,time,urllib.request,pathlib
+          for attempt in range(12):
+              try:
+                  with urllib.request.urlopen('https://trendsculpt.onrender.com/api/health',timeout=30) as response:
+                      health=json.load(response)
+                  if health.get('ok') and health.get('storage')=='postgresql' and health.get('hostedStorage') and health.get('emailDelivery') is False:
+                      pathlib.Path('/tmp/trendsculpt-live-health.json').write_text(json.dumps(health))
+                      print('Live application is ready with PostgreSQL and local models.')
+                      break
+              except Exception:
+                  pass
+              print('Waiting for the free application to wake up; attempt',attempt+1)
+              time.sleep(5)
+          else:
+              raise SystemExit('Live application did not become ready with PostgreSQL and disabled email delivery.')
+          PY
+      - name: Exercise the live website and clean up temporary accounts
+        working-directory: site
+        run: npx playwright test --reporter=line,json
+      - name: Publish credential-free results
+        if: always()
+        run: python site/scripts/record_live_check.py

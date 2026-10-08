@@ -3,10 +3,14 @@ import { existsSync } from "node:fs";
 const targetURL = process.env.TRENDSCULPT_TEST_URL;
 export default defineConfig({
   testDir: "tests",
-  timeout: 45000,
+  timeout: targetURL ? 120000 : 45000,
+  expect: { timeout: targetURL ? 20000 : 5000 },
+  workers: 1,
+  retries: process.env.CI ? 1 : 0,
   use: {
     baseURL: targetURL || "http://127.0.0.1:5174",
     headless: true,
+    navigationTimeout: targetURL ? 60000 : 30000,
     launchOptions: {
       executablePath: existsSync("/usr/bin/chromium")
         ? "/usr/bin/chromium"
