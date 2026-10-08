@@ -1,0 +1,64 @@
+{
+  "site": "https://trendsculpt.onrender.com",
+  "testedAt": "2026-10-08T12:50:07.067071+00:00",
+  "commit": "4788d0784db4cbc9e77a2105621231307f9f1238",
+  "passed": false,
+  "health": {
+    "ok": true,
+    "storage": "postgresql",
+    "hostedStorage": true,
+    "emailDelivery": false
+  },
+  "tests": [
+    {
+      "name": "secure creator journey persists and deletes with password confirmation",
+      "status": "unexpected",
+      "attempts": 2,
+      "durationMs": 78288,
+      "httpResponses": []
+    },
+    {
+      "name": "password recovery uses one-time codes and supports a fresh login",
+      "status": "expected",
+      "attempts": 1,
+      "durationMs": 11219,
+      "httpResponses": []
+    },
+    {
+      "name": "mobile navigation and actual image/video measurement work",
+      "status": "unexpected",
+      "attempts": 2,
+      "durationMs": 63379,
+      "httpResponses": []
+    },
+    {
+      "name": "brands can update preferences and train/delete a private dataset",
+      "status": "expected",
+      "attempts": 1,
+      "durationMs": 12385,
+      "httpResponses": []
+    },
+    {
+      "name": "public routes, source ledger and tablet layout stay usable",
+      "status": "expected",
+      "attempts": 1,
+      "durationMs": 7470,
+      "httpResponses": []
+    },
+    {
+      "name": "shared-browser history cannot reveal another account\u2019s report",
+      "status": "expected",
+      "attempts": 1,
+      "durationMs": 19474,
+      "httpResponses": [
+        {
+          "method": "GET",
+          "path": "/api/reports/:id",
+          "status": 404
+        }
+      ]
+    }
+  ],
+  "runUrl": "https://github.com/js10-beep/trendsculpt/actions/runs/37779204793",
+  "cleanup": "Temporary accounts are removed by each browser test fixture; cleanup errors fail their tests."
+}
