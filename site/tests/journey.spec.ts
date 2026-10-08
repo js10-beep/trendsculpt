@@ -138,6 +138,7 @@ test("password recovery uses one-time codes and supports a fresh login", async (
   const { email, code } = await signup(page, "Recovery Creator");
   await logout(page);
   await page.getByRole("link", { name: "Forgot password?" }).click();
+  await expect(page.getByRole("heading", { name: "Recover your account." })).toBeVisible();
   await page.getByLabel("Email", { exact: true }).fill(email);
   await page.getByLabel("Recovery code", { exact: true }).fill(code);
   await page
