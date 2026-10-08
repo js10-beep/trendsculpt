@@ -1,0 +1,11 @@
+node_modules
+.venv
+.data
+.models
+dist
+.env*
+test-results
+playwright-report
+__pycache__
+.git
+*.tsbuildinfo

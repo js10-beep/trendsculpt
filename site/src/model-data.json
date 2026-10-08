@@ -1,0 +1,132 @@
+{
+  "models": [
+    {
+      "platform": "Instagram",
+      "rows": 176,
+      "testRows": 48,
+      "testGroups": 34,
+      "holdoutMAE": 1.208,
+      "baselineMAE": 1.414,
+      "beatsBaseline": true,
+      "medianRate": 5.297,
+      "rateDefinition": "(likes + comments + shares + saves) / impressions",
+      "label": "Instagram sample",
+      "method": "TF-IDF + ridge regression; grouped 25% holdout; similarity retrieval",
+      "limitations": "Small, biased observational sample. Correlation is not causation. Historical mixed-format YouTube observations do not validate modern Shorts predictions."
+    },
+    {
+      "platform": "YouTube",
+      "rows": 1671,
+      "testRows": 420,
+      "testGroups": 404,
+      "holdoutMAE": 3.041,
+      "baselineMAE": 3.433,
+      "beatsBaseline": true,
+      "medianRate": 3.276,
+      "rateDefinition": "(likes + comments) / views",
+      "label": "2018 YouTube trending archive; not a Shorts dataset",
+      "method": "TF-IDF + ridge regression; grouped 25% holdout; similarity retrieval",
+      "limitations": "Small, biased observational sample. Correlation is not causation. Historical mixed-format YouTube observations do not validate modern Shorts predictions."
+    }
+  ],
+  "sources": [
+    {
+      "file": "Instagram data.csv",
+      "platform": "Instagram",
+      "commit": "6c3f3ebde421a9d5a57105d47fbd259605faf545",
+      "source": "https://raw.githubusercontent.com/amankharwal/Website-data/6c3f3ebde421a9d5a57105d47fbd259605faf545/Instagram%20data.csv",
+      "sha256": "b4a067defa02da9d5f429c163048fef1a2aeb2613225fd82e2af93b777cbc470",
+      "rows": 176
+    },
+    {
+      "file": "18.01.11_BR_videos.csv",
+      "platform": "YouTube Shorts",
+      "commit": "269a76231aa5f155b68bcc41b6289cac8ed95078",
+      "source": "https://raw.githubusercontent.com/mitchelljy/Trending-YouTube-Scraper/269a76231aa5f155b68bcc41b6289cac8ed95078/output/18.01.11_BR_videos.csv",
+      "sha256": "eac80e4d1aa6ddb4686a9b93d8d63446b186a0f285d89355b57652e0cd440f11",
+      "rows": 200
+    },
+    {
+      "file": "18.01.11_CA_videos.csv",
+      "platform": "YouTube Shorts",
+      "commit": "269a76231aa5f155b68bcc41b6289cac8ed95078",
+      "source": "https://raw.githubusercontent.com/mitchelljy/Trending-YouTube-Scraper/269a76231aa5f155b68bcc41b6289cac8ed95078/output/18.01.11_CA_videos.csv",
+      "sha256": "5721f01dea031f6ada02985ba8db7e4e1522dde837934c6f0671e2705e77b440",
+      "rows": 84
+    },
+    {
+      "file": "18.01.11_DE_videos.csv",
+      "platform": "YouTube Shorts",
+      "commit": "269a76231aa5f155b68bcc41b6289cac8ed95078",
+      "source": "https://raw.githubusercontent.com/mitchelljy/Trending-YouTube-Scraper/269a76231aa5f155b68bcc41b6289cac8ed95078/output/18.01.11_DE_videos.csv",
+      "sha256": "99b4314cbb701629361e7b00dec78398331e7b3c8aa68737980c7fa262123d22",
+      "rows": 200
+    },
+    {
+      "file": "18.01.11_FR_videos.csv",
+      "platform": "YouTube Shorts",
+      "commit": "269a76231aa5f155b68bcc41b6289cac8ed95078",
+      "source": "https://raw.githubusercontent.com/mitchelljy/Trending-YouTube-Scraper/269a76231aa5f155b68bcc41b6289cac8ed95078/output/18.01.11_FR_videos.csv",
+      "sha256": "68cd235f1db1b17b0a0cce85eb0d69a7b4f405e4db78a3f0d2ce31520858a891",
+      "rows": 200
+    },
+    {
+      "file": "18.01.11_GB_videos.csv",
+      "platform": "YouTube Shorts",
+      "commit": "269a76231aa5f155b68bcc41b6289cac8ed95078",
+      "source": "https://raw.githubusercontent.com/mitchelljy/Trending-YouTube-Scraper/269a76231aa5f155b68bcc41b6289cac8ed95078/output/18.01.11_GB_videos.csv",
+      "sha256": "267666579600302612a26aebffdadafd3ed2d7e807a4b9694a4721b94d25d0c5",
+      "rows": 77
+    },
+    {
+      "file": "18.01.11_IN_videos.csv",
+      "platform": "YouTube Shorts",
+      "commit": "269a76231aa5f155b68bcc41b6289cac8ed95078",
+      "source": "https://raw.githubusercontent.com/mitchelljy/Trending-YouTube-Scraper/269a76231aa5f155b68bcc41b6289cac8ed95078/output/18.01.11_IN_videos.csv",
+      "sha256": "f3dc13d36e3a0b2e51cbb520202b54cacfcd70261c2c4a4717af3985c6d6c68c",
+      "rows": 200
+    },
+    {
+      "file": "18.01.11_JP_videos.csv",
+      "platform": "YouTube Shorts",
+      "commit": "269a76231aa5f155b68bcc41b6289cac8ed95078",
+      "source": "https://raw.githubusercontent.com/mitchelljy/Trending-YouTube-Scraper/269a76231aa5f155b68bcc41b6289cac8ed95078/output/18.01.11_JP_videos.csv",
+      "sha256": "a6e250cc51af1074adbce0a4d4ace43d241f3eb2150c4d2f1347ec59f398742c",
+      "rows": 200
+    },
+    {
+      "file": "18.01.11_KR_videos.csv",
+      "platform": "YouTube Shorts",
+      "commit": "269a76231aa5f155b68bcc41b6289cac8ed95078",
+      "source": "https://raw.githubusercontent.com/mitchelljy/Trending-YouTube-Scraper/269a76231aa5f155b68bcc41b6289cac8ed95078/output/18.01.11_KR_videos.csv",
+      "sha256": "54f3146a5a01bef45bc08e8552ebf3de3d74688f7252c23e1f926b7969cc2746",
+      "rows": 200
+    },
+    {
+      "file": "18.01.11_MX_videos.csv",
+      "platform": "YouTube Shorts",
+      "commit": "269a76231aa5f155b68bcc41b6289cac8ed95078",
+      "source": "https://raw.githubusercontent.com/mitchelljy/Trending-YouTube-Scraper/269a76231aa5f155b68bcc41b6289cac8ed95078/output/18.01.11_MX_videos.csv",
+      "sha256": "47346df6afcd7193802f0f344ea6918742e3b22a9ac43a8fdd03359143c87f5d",
+      "rows": 199
+    },
+    {
+      "file": "18.01.11_RU_videos.csv",
+      "platform": "YouTube Shorts",
+      "commit": "269a76231aa5f155b68bcc41b6289cac8ed95078",
+      "source": "https://raw.githubusercontent.com/mitchelljy/Trending-YouTube-Scraper/269a76231aa5f155b68bcc41b6289cac8ed95078/output/18.01.11_RU_videos.csv",
+      "sha256": "d1c805a6427a2ad21cb1718bf49724e418a0ead59979178cc463cc49ce2abb69",
+      "rows": 200
+    },
+    {
+      "file": "18.01.11_US_videos.csv",
+      "platform": "YouTube Shorts",
+      "commit": "269a76231aa5f155b68bcc41b6289cac8ed95078",
+      "source": "https://raw.githubusercontent.com/mitchelljy/Trending-YouTube-Scraper/269a76231aa5f155b68bcc41b6289cac8ed95078/output/18.01.11_US_videos.csv",
+      "sha256": "ba9c4250b3f582fe1d3e24c6665e087a160382d2a16bfd5b6d7db98c910b4ad4",
+      "rows": 200
+    }
+  ],
+  "trainedAt": "2026-10-08",
+  "provider": "Local scikit-learn models"
+}

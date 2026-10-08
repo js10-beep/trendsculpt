@@ -1,0 +1,102 @@
+# TrendSculpt — creator & brand content intelligence
+
+This is the **new full-stack site** in `/workspace/trendsculpt/site`. The earlier browser-local demo in the parent directory remains separate. This version uses real password-protected server accounts, private durable storage, local trained models, and actual image/video measurements. Sites was unavailable in the session; no public site has been published.
+
+## Start the site
+
+Requires Node.js 22+, Python 3.12, FFmpeg, and FFprobe. Dependencies are pinned in `package-lock.json` and `server/requirements.lock.txt`.
+
+```sh
+cd /workspace/trendsculpt/site
+npm ci
+python -m venv .venv
+.venv/bin/python -m pip install -r server/requirements.lock.txt
+OPENBLAS_NUM_THREADS=2 .venv/bin/python scripts/prepare_models.py --skip-metadata
+npm run dev
+```
+
+Development serves the website on port **5174** and its API on port **8000**. The Vite proxy keeps browser API requests on the same origin. The startup script uses the local virtual environment when available. It stops both processes together and watches backend source changes.
+
+Start with Home → Get started → signup → save the recovery code → onboarding → analysis → report → compare → save → library. Creator, Brand, and Agency preferences are supported. Individual reports, private datasets, and the entire account can be deleted. Account deletion requires the current password.
+
+## Functional accounts and storage
+
+- Passwords use salted scrypt hashes; raw passwords are not stored.
+- Sessions use random tokens in HTTP-only SameSite cookies. Only token hashes are stored in SQLite.
+- Login, remember-me, logout, profile/preferences, private reports/media, recovery, deletion, and the monthly quota are server-backed.
+- Password recovery uses a **one-time recovery code shown at signup**. Resetting rotates that code and revokes all sessions. Store the replacement code safely.
+- Email verification, password-reset email delivery, and notification delivery are **not configured**. The UI does not claim to send them. Email addresses are login identifiers, not verified inbox ownership.
+- SQLite, private uploaded media, and private dataset models live in ignored `.data/app.sqlite`. Keep this directory on durable storage. Model artifacts live separately in ignored `.models`, so mounting a fresh data volume does not hide the bundled model.
+- User content is not kept in localStorage or sessionStorage. Server authorization filters every private operation by its authenticated owner; client-side scores are not trusted.
+- The free workspace allows **100 completed analysis requests per UTC calendar month**, enforced on the server. Saving an existing analysis does not consume another credit. Deleting reports does not reset usage. Revisions are new analyses.
+- Unsaved analyses are private server drafts and survive reload; they are not listed in the saved library until saved. Account deletion removes drafts too. Backups and operational retention must be configured by the deployment operator.
+
+## What the analysis actually does
+
+`server/analysis.py` combines transparent caption/hook/CTA features with local **TF-IDF + ridge regression and similarity retrieval**. Platform matching and relevance/validation gates determine whether historical model evidence adjusts the engagement signal. The adjustment is capped at a 20% blend for that signal. TikTok, LinkedIn, and X currently use the content framework because no platform-specific training observations are bundled.
+
+- **Instagram:** 176 public observations; `(likes + comments + shares + saves) / impressions` as the target.
+- **YouTube:** 1,671 deduplicated observations across archived regional YouTube API exports from 2018; `(likes + comments) / views` as the target. This archive is **not a modern Shorts dataset**.
+- Validation uses a fixed 25% grouped holdout, keeping identical Instagram captions or YouTube channels out of both sides of the split. The Instagram model's mean absolute error is 1.208 percentage points versus a median-only baseline of 1.414. YouTube's is 3.041 versus 3.433. These are single offline split results, not a production accuracy guarantee.
+- Report evidence includes reference size, similarity, historical-pattern estimate, error-band heuristic, validation, and whether the model contributed to the score. The error band is **not a calibrated confidence interval**.
+- Pillow measures actual image exposure, contrast, clipped pixels, edge detail, and resolution. FFmpeg extracts up to five frames across the first seconds of uploaded video; FFprobe reads duration, dimensions, and audio-track presence. Uploaded MP4 signatures are validated, and media processing is restricted to local file/pipe protocols.
+- The current pipeline does **not** understand visual subjects, transcribe speech, evaluate all video frames, or generate prose with a large language model. Caption/hook/CTA alternatives are dynamic templates grounded in the supplied topic and text. Paste your script/transcript for feedback on spoken hooks.
+- Scores and suggestions are guidance. They cannot establish causation or guarantee engagement, virality, retention, revenue, or real-world lifts.
+
+## Data sources and private training
+
+The complete source ledger, pinned revisions, row counts, and SHA-256 checksums are in `server/source-manifest.json`. Bootstrap validates each checksum before training. Training is reproducible with the pinned Python dependencies.
+
+Bundled sources are [Aman Kharwal's public Instagram observations](https://github.com/amankharwal/Website-data/blob/6c3f3ebde421a9d5a57105d47fbd259605faf545/Instagram%20data.csv) and regional CSVs in [mitchelljy/Trending-YouTube-Scraper](https://github.com/mitchelljy/Trending-YouTube-Scraper). Raw datasets and model artifacts remain outside tracked source files. Public rows are reference observations, not user-account data. Verify upstream permissions before using them beyond this evaluation.
+
+In **Data & models**, upload a CSV downloaded from Kaggle, Hugging Face, a permitted API export, or your own analytics. Each account can keep one private model per supported platform. The import validates and trains it locally; other accounts cannot access it. New analyses prefer the account's matching private model. Removing the private dataset restores the bundled model for future analyses; saved reports preserve their original evidence.
+
+CSV requirements: 20–5,000 valid rows, at least eight distinct captions/channels, maximum 5 MB. Use `caption`, `title`, or `text`; `impressions` for Instagram or `views`/`view_count` for YouTube; and interaction columns such as `likes`, `comments`/`comment_count`, with optional Instagram `shares` and `saves`. Add `channel_id` when combining channels to support grouped validation. Confirm your permission to process uploaded data.
+
+Optional command-line importers:
+
+```sh
+.venv/bin/python scripts/import_external.py kaggle owner/dataset --file data.csv --output .data/imports/kaggle.csv
+.venv/bin/python scripts/import_external.py huggingface owner/dataset path/to/data.csv --output .data/imports/hf.csv
+.venv/bin/python scripts/import_external.py youtube --region US --pages 2 --output .data/imports/youtube.csv
+```
+
+The YouTube importer needs `YOUTUBE_API_KEY`; private Hugging Face datasets may need `HF_TOKEN`, and Kaggle may need `KAGGLE_USERNAME`/`KAGGLE_KEY`. Supply private credentials through secure server environment settings, never frontend variables or chat. These external importers have not been end-to-end validated: Hugging Face and Kaggle were blocked by the current runtime allowlist, and no live YouTube key was supplied. Their needed network additions were saved in the environment draft, which does not apply runtime changes or publish a site. CSV upload and local training **were** tested end-to-end and work without those services.
+
+## Build and publish
+
+```sh
+npm run build
+.venv/bin/python -m uvicorn server.app:app --host 0.0.0.0 --port 8000
+```
+
+The Python server serves the compiled frontend, private API, and client-side routes from one origin. A static-only host is insufficient for accounts, persistence, and analysis. Configure an HTTPS domain, `SITE_ORIGIN=https://your-domain`, `COOKIE_SECURE=true`, and durable `.data` storage. `.env.example` documents variables; the application expects deployment environment injection rather than loading that example automatically. Use a single host/durable volume for SQLite; moving to multiple independent servers requires a shared database/auth/storage architecture.
+
+A Dockerfile is supplied for a full-stack deployment. It builds the frontend, installs the pinned Python stack and FFmpeg, trains checksum-verified models, and runs as an unprivileged user. Its image build, all six browser journeys, and account/session/report/quota persistence across a container restart were validated in this environment. Configure the actual hosting domain, HTTPS and durable storage before publication.
+
+```sh
+docker build -t trendsculpt .
+docker run --rm -p 8000:8000 -v trendsculpt-data:/app/.data \
+  -e SITE_ORIGIN=https://your-domain -e COOKIE_SECURE=true trendsculpt
+```
+
+For a managed proxy, pass Docker's standard proxy build arguments. If that proxy uses a platform-provided CA, supply its trusted public certificate bundle with `--secret id=environment_ca,src=/path/to/trusted-ca-bundle.crt`. The optional secret extends trust for npm, pip and checksum-verified dataset downloads during the build; it is not copied into the runtime image. Keep TLS verification enabled. This environment also required an explicit Docker `--add-host` mapping for its proxy hostname; use the environment's supported resolution rather than a hard-coded address.
+
+A public URL has not been created. Connect Sites or choose a hosting destination to publish the reviewed site. Publishing the **cloud environment snapshot** is separate from publishing this website.
+
+## Validation
+
+```sh
+npm run build
+npm test
+.venv/bin/python -m unittest server.test_app -v
+npm run test:e2e
+```
+
+To exercise an already running compiled production server instead of starting Vite, set `TRENDSCULPT_TEST_URL` to that server's origin when running `npm run test:e2e`. The verified results were three analysis unit tests, seven server tests, and six browser journeys, with the browser suite passing on both development and the production container.
+
+API tests use an isolated temporary database. Browser tests cover real signup/login, one-time recovery, persisted reports, comparisons, profile/preferences, private CSV training/deletion, image/video measurement, confirmed deletion, mobile/tablet layouts, public pages, and cross-account browser-history isolation. Chromium is selected automatically when installed; otherwise use Playwright's verified browser installation.
+
+Frontend architecture: reusable page/components in `src/main.tsx`, a typed API adapter in `src/store.ts`, sample-only scoring in `src/engine.ts`, and local font assets. Runtime scoring lives on the server. Backend modules separate authentication/storage, analysis/media processing, and private dataset training.
+
+Each cloud task already runs in an isolated environment. Use the existing checkout and this `site` directory; do not create worktrees unless explicitly requested. Preserve private data and user changes when refreshing setup.
