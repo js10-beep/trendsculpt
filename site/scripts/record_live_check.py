@@ -32,6 +32,7 @@ def main():
                 for test in spec.get("tests", []):
                     requests = []
                     errors = []
+                    states = []
                     for result in test.get("results", []):
                         for item in result.get("stdout", []):
                             line = item.get("text", "").strip()
@@ -46,6 +47,12 @@ def main():
                                             for k in ["method", "path", "status"]
                                         }
                                     )
+                                except (ValueError, KeyError):
+                                    pass
+                            elif line.startswith("LIVE_CHECK_UI "):
+                                try:
+                                    state = json.loads(line.removeprefix("LIVE_CHECK_UI "))
+                                    states.append({k: state[k] for k in ["route", "processing", "mediaPreview", "unsupportedVideo", "missingUpload", "hasAlert"]})
                                 except (ValueError, KeyError):
                                     pass
                         for error in result.get("errors", []):
@@ -100,6 +107,7 @@ def main():
                             ),
                             "httpResponses": requests,
                             "errors": errors,
+                            "uiStates": states,
                         }
                     )
             visit(suite.get("suites", []))

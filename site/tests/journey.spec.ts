@@ -26,7 +26,11 @@ async function signup(page: Page, name: string) {
   return { email, code };
 }
 async function logout(page: Page) {
+  const response = page.waitForResponse((r) =>
+    r.url().endsWith("/api/auth/logout") && r.request().method() === "POST",
+  );
   await page.getByRole("button", { name: /Free account/ }).click();
+  expect((await response).status()).toBe(200);
   await page.goto("/login");
 }
 test("secure creator journey persists and deletes with password confirmation", async ({
@@ -74,7 +78,14 @@ test("secure creator journey persists and deletes with password confirmation", a
   });
   await page.getByRole("button", { name: "Use this version" }).first().click();
   await expect(page.getByText(/Model estimate/)).toBeVisible();
+  const originalURL = page.url();
+  const revisionSaved = page.waitForResponse((r) =>
+    /\/api\/reports\/[^/]+\/save$/.test(r.url()) &&
+    r.request().method() === "POST",
+  );
   await page.getByRole("button", { name: "Save revision" }).click();
+  expect((await revisionSaved).status()).toBe(200);
+  await expect(page).not.toHaveURL(originalURL);
   await expect(
     page.getByRole("button", { name: "Saved to library" }),
   ).toBeDisabled();
@@ -204,7 +215,13 @@ test("mobile navigation and actual image/video measurement work", async ({
   await page
     .getByLabel("Upload media")
     .setInputFiles("tests/fixtures/short.mp4");
+  await expect(page.locator(".media-preview video")).toBeVisible();
+  const videoAnalysis = page.waitForResponse((r) =>
+    r.url().endsWith("/api/analyze") && r.request().method() === "POST",
+    { timeout: 90000 },
+  );
   await page.getByRole("button", { name: "Analyze my content" }).click();
+  expect((await videoAnalysis).status()).toBe(200);
   await expect(
     page.getByRole("heading", { name: "We looked at the actual pixels." }),
   ).toBeVisible();

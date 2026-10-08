@@ -7,7 +7,7 @@ export type { Page };
 // Each test may create only its own randomized example.com accounts. Track those
 // credentials in memory and delete the accounts even when a browser assertion fails.
 export const test = base.extend({
-  page: async ({ page }, use) => {
+  page: async ({ page }, use, testInfo) => {
     const accounts = new Map<string, string>();
     const pending = new Set<Promise<void>>();
     const origin = new URL(
@@ -81,6 +81,17 @@ export const test = base.extend({
     try {
       await use(page);
     } finally {
+      if (testInfo.status !== testInfo.expectedStatus && !page.isClosed()) {
+        const diagnostics = await page.evaluate(() => ({
+          route: location.pathname.replace(/[0-9a-f]{8}-[0-9a-f-]{27}/gi, ":id"),
+          processing: !!document.querySelector(".processing"),
+          mediaPreview: !!document.querySelector(".media-preview"),
+          unsupportedVideo: document.body.innerText.includes("This video cannot be played in this browser."),
+          missingUpload: document.body.innerText.includes("Upload your image or video first."),
+          hasAlert: !!document.querySelector('[role="alert"]'),
+        })).catch(() => null);
+        if (diagnostics) console.log("LIVE_CHECK_UI " + JSON.stringify(diagnostics));
+      }
       await Promise.all([...pending]);
       const failures: string[] = [];
       for (const [email, password] of accounts) {
