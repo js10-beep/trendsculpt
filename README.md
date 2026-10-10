@@ -2,7 +2,7 @@
 
 Status: PASS
 
-[Workflow details](https://github.com/js10-beep/trendsculpt/actions/runs/37805714639)
+[Workflow details](https://github.com/js10-beep/trendsculpt/actions/runs/38027982426)
 
 Target: https://trendsculpt.onrender.com
 
@@ -12,6 +12,7 @@ Target: https://trendsculpt.onrender.com
 | password recovery uses one-time codes and supports a fresh login | expected |
 | mobile navigation and actual image/video measurement work | expected |
 | brands can update preferences and train/delete a private dataset | expected |
+| creator transcripts and watch metrics train privately and short-video references remain separate | expected |
 | long-form video uploads get grounded chapters and saved frame evidence | expected |
 | long-form transcript reviews reject bad timing and keep untimed chapters honest | expected |
 | public routes, source ledger and tablet layout stay usable | expected |
