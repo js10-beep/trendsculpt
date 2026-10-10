@@ -211,6 +211,9 @@ def health():
         },
         "hostedStorage": STORAGE == "postgresql",
         "deploymentRevision": os.environ.get("RENDER_GIT_COMMIT", ""),
+        "modelVersion": json.loads(
+            (ROOT / "server/reference-data/artifact-manifest.json").read_text()
+        )["version"],
     }
 
 
@@ -688,8 +691,8 @@ def sources():
         "models": [m["info"] for m in MODELS.values()],
         "sources": json.loads((ROOT / "server/source-manifest.json").read_text()),
         "connectors": {
-            "huggingFace": "Not connected; network access required",
-            "kaggle": "Not connected; network access required",
+            "huggingFace": "Pinned KuaiRand-1K mirror sample bundled; no live refresh",
+            "kaggle": "Pinned YouTube dataset version 1346 bundled; no live refresh",
             "youtubeAPI": "Not connected; API key required",
         },
         "visualPipeline": "Pillow + FFmpeg actual pixel and frame measurements",
@@ -717,10 +720,19 @@ async def upload_dataset(request: Request):
         raise HTTPException(400, "Confirm you have permission to use this data.")
     if not isinstance(data.get("csv"), str):
         raise HTTPException(400, "Upload a CSV dataset.")
+    if not VIDEO_SLOT.acquire(blocking=False):
+        raise HTTPException(
+            429,
+            "Another media analysis or dataset training is in progress. Try again shortly.",
+        )
     try:
-        model = train_private_csv(data["csv"], data["platform"])
+        model = await run_in_threadpool(
+            train_private_csv, data["csv"], data["platform"]
+        )
     except (ValueError, csv.Error) as e:
         raise HTTPException(400, str(e))
+    finally:
+        VIDEO_SLOT.release()
     with db() as c:
         c.execute(
             "INSERT INTO datasets VALUES(?,?,?,?) ON CONFLICT(user_id,platform) DO UPDATE SET model=excluded.model,info=excluded.info",

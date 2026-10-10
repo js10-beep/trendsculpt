@@ -41,6 +41,33 @@ export type Report = Input & {
   applied: boolean;
   sample?: boolean;
   provider?: string;
+  watchReference?: {
+    sourcePlatform: string;
+    label: string;
+    measuredDuration: number;
+    durationBand: number[];
+    referenceEstimate: number;
+    observedWatchPercent: number;
+    referenceVideos: number;
+    referenceExposures: number;
+    modelUsedForScore: boolean;
+    validation: {
+      holdoutMAE: number;
+      baselineMAE: number;
+      limitations: string;
+    };
+    note: string;
+  } | null;
+  creatorWatchEvidence?: {
+    datasetRows: number;
+    historicalEstimate: number | null;
+    similarity: number;
+    usableReference: boolean;
+    validation: { holdoutMAE: number; baselineMAE: number; grouping: string };
+    modelUsedForScore: boolean;
+    neighbors: { title: string; observedWatchPercent: number }[];
+    note: string;
+  } | null;
   contentReview?: {
     source: string;
     hasTranscript: boolean;

@@ -248,6 +248,10 @@ class WorkflowTests(unittest.TestCase):
             mediaName="short.mp4",
         )
         self.assertEqual(r.status_code, 200, r.text)
+        self.assertFalse(
+            r.json()["watchReference"]
+            and r.json()["watchReference"]["modelUsedForScore"]
+        )
         self.assertGreater(r.json()["mediaAnalysis"]["framesSampled"], 1)
         self.assertAlmostEqual(r.json()["mediaAnalysis"]["duration"], 1, places=1)
         self.assertEqual(
@@ -389,6 +393,96 @@ class WorkflowTests(unittest.TestCase):
                 },
             ).status_code,
             400,
+        )
+
+    def test_public_references_have_validated_targets_and_provenance(self):
+        sources = self.a.get("/api/sources").json()
+        models = {m["platform"]: m for m in sources["models"]}
+        self.assertEqual(models["YouTube"]["rows"], 30000)
+        self.assertTrue(models["YouTube"]["temporalValidation"]["beatsBaseline"])
+        self.assertLess(
+            models["YouTube"]["holdoutMAE"], models["YouTube"]["baselineMAE"]
+        )
+        self.assertEqual(models["Kuaishou reference"]["rows"], 5432)
+        self.assertEqual(sources["sources"][2]["license"], "CC BY-SA 4.0")
+        self.account(self.a)
+        r = self.analyze(
+            self.a,
+            platform="YouTube (long-form)",
+            text="How to mix sourdough flour and water?",
+        ).json()
+        self.assertEqual(r["evidence"]["datasetRows"], 30000)
+        self.assertIsNone(r["watchReference"])
+        self.assertIn(
+            "public-2020-2024-kuairand",
+            self.a.get("/api/health").json()["modelVersion"],
+        )
+
+    def test_measured_short_video_gets_separate_kuaishou_reference(self):
+        self.account(self.a)
+        video = (
+            pathlib.Path(__file__).resolve().parents[1]
+            / "tests/fixtures/watch-reference.mp4"
+        ).read_bytes()
+        r = self.analyze(
+            self.a,
+            type="Video",
+            platform="YouTube Shorts",
+            media="data:video/mp4;base64," + base64.b64encode(video).decode(),
+            mediaName="sample.mp4",
+            duration=90,
+            transcript="0:00 Mix 50 grams of flour with water.\n0:07 Feed your sourdough starter every day.",
+        ).json()
+        reference = r["watchReference"]
+        self.assertAlmostEqual(reference["measuredDuration"], 10, delta=0.2)
+        self.assertEqual(reference["durationBand"], [5, 15])
+        self.assertFalse(reference["modelUsedForScore"])
+        self.assertGreater(reference["referenceExposures"], 100)
+        self.assertIsNone(r["creatorWatchEvidence"])
+        saved = self.a.get("/api/reports/" + r["id"]).json()
+        self.assertEqual(saved["watchReference"], reference)
+
+    def test_private_creator_watch_training_is_scoped_deleted_and_quoted(self):
+        self.account(self.a)
+        self.account(self.b, "two@example.com")
+        csv_text = (
+            pathlib.Path(__file__).resolve().parents[1]
+            / "tests/fixtures/synthetic-creator-watch.csv"
+        ).read_text()
+        response = self.a.post(
+            "/api/datasets",
+            json={"platform": "YouTube", "csv": csv_text, "permission": True},
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["watchRows"], 40)
+        self.assertTrue(response.json()["watchValidation"]["beatsBaseline"])
+        r = self.analyze(
+            self.a,
+            platform="YouTube (long-form)",
+            text="",
+            videoTitle="Sourdough flour water starter",
+            transcript="0:00 Mix 50 grams of flour with water.\n0:40 Feed your sourdough starter every day.",
+        ).json()
+        self.assertEqual(r["creatorWatchEvidence"]["datasetRows"], 40)
+        self.assertTrue(r["creatorWatchEvidence"]["usableReference"])
+        self.assertTrue(
+            any(
+                s.get("source") == "Your private creator analytics"
+                and "50 grams" in s["quote"]
+                for s in r["recommendations"]
+            )
+        )
+        self.assertIsNone(
+            self.analyze(self.b, platform="YouTube Shorts").json()[
+                "creatorWatchEvidence"
+            ]
+        )
+        self.assertEqual(self.b.get("/api/reports/" + r["id"]).status_code, 404)
+        self.assertEqual(self.a.delete("/api/datasets/YouTube").status_code, 200)
+        self.assertIsNone(
+            self.analyze(self.a, platform="YouTube Shorts").json()[
+                "creatorWatchEvidence"
+            ]
         )
 
 

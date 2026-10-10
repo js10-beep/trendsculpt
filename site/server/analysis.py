@@ -1,11 +1,20 @@
-import base64, io, json, math, pathlib, re, subprocess, tempfile, uuid
+import base64, io, json, math, pathlib, re, subprocess, tempfile, uuid, hashlib
 from datetime import datetime, timezone
 import joblib, numpy as np
 from .media import inspect_media
 from .content_review import review_content, LONG_FORM
+from .watch_reference import public_watch_reference, private_watch_evidence
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-MODELS = joblib.load(ROOT / ".models/models.joblib")
+MODEL_ARTIFACT = ROOT / ".models/models.joblib"
+MODEL_METADATA = json.loads(
+    (ROOT / "server/reference-data/artifact-manifest.json").read_text()
+)
+if hashlib.sha256(MODEL_ARTIFACT.read_bytes()).hexdigest() != MODEL_METADATA["sha256"]:
+    raise RuntimeError(
+        "Installed reference model is stale or corrupt; run scripts/prepare_models.py."
+    )
+MODELS = joblib.load(MODEL_ARTIFACT)
 clamp = lambda n: max(15, min(96, round(float(n))))
 
 
@@ -135,7 +144,7 @@ def analyze_content(data, media_stats=None, private_models=None):
         similarities = (model["matrix"] @ query.T).toarray().ravel()
         indices = np.argsort(similarities)[::-1][:5]
         max_similarity = float(similarities[indices[0]])
-        prediction = max(0, float(np.expm1(model["reg"].predict(query)[0])))
+        prediction = float(np.clip(np.expm1(model["reg"].predict(query)[0]), 0, 100))
         matched = [model["rows"][int(i)] for i in indices if similarities[i] >= 0.06]
         rates = [r["rate"] for r in model["rows"]]
         rank = clamp(sum(r <= prediction for r in rates) / len(rates) * 100)
@@ -327,6 +336,28 @@ def analyze_content(data, media_stats=None, private_models=None):
                 "Video samples available for inspection",
             ]
         recommendations.sort(key=lambda r: 0 if r.get("priority") == "High" else 1)
+    creator_watch = private_watch_evidence(text, (private_models or {}).get(model_key))
+    if (
+        review
+        and review["hasTranscript"]
+        and creator_watch
+        and creator_watch["usableReference"]
+        and creator_watch["neighbors"]
+    ):
+        neighbor = max(
+            creator_watch["neighbors"], key=lambda n: n["observedWatchPercent"]
+        )
+        recommendations.append(
+            {
+                "title": "Test this opening against your own watch-time history",
+                "reason": f"A similar record in your private dataset, “{neighbor['title']}”, observed {neighbor['observedWatchPercent']}% of video length watched. This is a content comparison, not proof that its wording caused the result.",
+                "suggestion": f"Compare your current opening with “{review['hooks'][0]}” while keeping the rest of this video similar. Measure actual watch time and responses for your audience.",
+                "quote": review["openingQuote"][:220],
+                "timestamp": None,
+                "source": "Your private creator analytics",
+                "priority": "Medium",
+            }
+        )
     overall = clamp(np.mean(list(scores.values())))
     summary = (
         f"Your {platform} {data['type'].lower()} has {'strong' if overall>=75 else 'developing'} potential in the content framework. The clearest next step is to {recommendations[0]['title'].lower()}. "
@@ -358,6 +389,8 @@ def analyze_content(data, media_stats=None, private_models=None):
         "ctas": ctas,
         "applied": bool(data.get("applied", False)),
         "evidence": evidence,
+        "watchReference": public_watch_reference(media_stats, platform, MODELS),
+        "creatorWatchEvidence": creator_watch,
         "mediaAnalysis": media_stats,
         "contentReview": (
             {

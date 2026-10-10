@@ -503,9 +503,9 @@ function DatasetCard() {
         </span>
         <h3>Real observations. Transparent estimates.</h3>
         <p>
-          Two local models reference Instagram observations and archived YouTube
-          API records. Examine the sources, methods, and limitations behind the
-          feedback.
+          Local models reference Instagram posts, 2020–2024 YouTube records, and
+          a separate short-video watch-time sample. Examine the sources,
+          methods, and limitations behind the feedback.
         </p>
         <Link
           to={useApp().user ? "/app/sources" : "/features"}
@@ -520,14 +520,14 @@ function DatasetCard() {
           <span>Instagram sample posts</span>
         </div>
         <div>
-          <b>1,671</b>
-          <span>Deduplicated YouTube archive records</span>
+          <b>30,000</b>
+          <span>Deduplicated India/US YouTube videos</span>
         </div>
       </div>
       <small>
-        Biased historical samples; the YouTube archive predates Shorts. These
-        models do not establish causation or guarantee future performance.
-        Private datasets can make the reference more relevant to your account.
+        Biased historical samples; no verified Shorts labels. These models do
+        not establish causation or guarantee future performance. Private
+        datasets can make the reference more relevant to your account.
       </small>
     </article>
   );
@@ -547,7 +547,7 @@ const FAQs = [
   ],
   [
     "How does the prediction work?",
-    "Local TF-IDF regression models trained on public Instagram and archived YouTube observations supply historical-pattern estimates. Content heuristics supply hook, clarity and CTA feedback. Model evidence is used cautiously and shown with limitations; there is no guarantee of actual engagement.",
+    "Local TF-IDF regression models trained on public Instagram and 2020–2024 YouTube observations supply historical-pattern estimates. A separate duration-based KuaiRand reference gives Kuaishou watch-time context. Content heuristics supply hook, clarity and CTA feedback. Model evidence is used cautiously and shown with limitations; there is no guarantee of actual engagement.",
   ],
   [
     "Which platforms can I select?",
@@ -2823,7 +2823,109 @@ function EvidencePanel({ report }: { report: Report }) {
           Explore data & models <ArrowUpRight size={15} />
         </Link>
       </div>
-      <div className="evidence-grid">
+      <div
+        className={
+          "evidence-grid" +
+          (report.watchReference || report.creatorWatchEvidence
+            ? " with-watch"
+            : "")
+        }
+      >
+        {report.creatorWatchEvidence && (
+          <article className="card creator-watch-evidence">
+            <span className="pill">YOUR PRIVATE CREATOR DATA</span>
+            <h3>Watch-time content comparison.</h3>
+            <p>
+              {report.creatorWatchEvidence.historicalEstimate === null ? (
+                "A watch-time estimate is hidden because validation or text relevance is insufficient."
+              ) : (
+                <>
+                  Historical-pattern estimate:{" "}
+                  <b>{report.creatorWatchEvidence.historicalEstimate}%</b> of
+                  video length watched. Replays can exceed 100%.
+                </>
+              )}
+            </p>
+            <div className="evidence-numbers">
+              <div>
+                <b>{report.creatorWatchEvidence.datasetRows}</b>
+                <span>Private watch-time records</span>
+              </div>
+              <div>
+                <b>{report.creatorWatchEvidence.similarity.toFixed(2)}</b>
+                <span>Maximum content similarity</span>
+              </div>
+              <div>
+                <b>{report.creatorWatchEvidence.validation.holdoutMAE}</b>
+                <span>Holdout error (percentage points)</span>
+              </div>
+            </div>
+            <p className="fine-print">{report.creatorWatchEvidence.note}</p>
+            <details>
+              <summary>
+                Matched creator observations <ChevronDown size={14} />
+              </summary>
+              <p>
+                {report.creatorWatchEvidence.validation.grouping}. Median-only
+                baseline error:{" "}
+                {report.creatorWatchEvidence.validation.baselineMAE}.
+              </p>
+              {report.creatorWatchEvidence.neighbors.map((n, i) => (
+                <div className="neighbor" key={i}>
+                  <span>{n.title}</span>
+                  <b>{n.observedWatchPercent}% watched</b>
+                </div>
+              ))}
+            </details>
+          </article>
+        )}
+        {report.watchReference && (
+          <article className="card watch-reference">
+            <span className="pill">KUAISHOU · CROSS-PLATFORM REFERENCE</span>
+            <h3>Short-video watch-time context.</h3>
+            <p>
+              Your measured video length is{" "}
+              <b>{report.watchReference.measuredDuration}s</b>. The{" "}
+              {report.watchReference.durationBand[0]}–
+              {report.watchReference.durationBand[1]}s reference group averaged{" "}
+              <b>{report.watchReference.observedWatchPercent}%</b> of video
+              length watched per random exposure.
+            </p>
+            <div className="evidence-numbers">
+              <div>
+                <b>{report.watchReference.referenceVideos.toLocaleString()}</b>
+                <span>Reference video groups</span>
+              </div>
+              <div>
+                <b>
+                  {report.watchReference.referenceExposures.toLocaleString()}
+                </b>
+                <span>Random exposures</span>
+              </div>
+              <div>
+                <b>{report.watchReference.referenceEstimate}%</b>
+                <span>Duration-model reference</span>
+              </div>
+            </div>
+            <p className="fine-print">{report.watchReference.note}</p>
+            <details>
+              <summary>
+                Source & validation <ChevronDown size={14} />
+              </summary>
+              <p>{report.watchReference.validation.limitations}</p>
+              <p>
+                Video-separated holdout error:{" "}
+                {report.watchReference.validation.holdoutMAE} percentage points.
+                Median-only baseline:{" "}
+                {report.watchReference.validation.baselineMAE}.
+              </p>
+              <p>
+                Gao et al., KuaiRand, CIKM 2022. Derived aggregate reference: CC
+                BY-SA 4.0.
+              </p>
+            </details>
+          </article>
+        )}
         {evidence && (
           <article className="card">
             <span className="pill">
@@ -3172,12 +3274,21 @@ function SourcesPage() {
                 Validation & method <ChevronDown size={14} />
               </summary>
               <p>{m.method}</p>
+              <p>Target: {m.rateDefinition}</p>
               <p>
                 Mean absolute error: {m.holdoutMAE} percentage points.
                 Median-only baseline: {m.baselineMAE}. Better than baseline:{" "}
-                {m.beatsBaseline ? "yes" : "no"}. This is a single offline
-                split, not a production accuracy guarantee.
+                {m.beatsBaseline ? "yes" : "no"}. This is offline validation,
+                not a production accuracy guarantee.
               </p>
+              {"temporalValidation" in m && m.temporalValidation && (
+                <p>
+                  Later unseen-channel test: {m.temporalValidation.testRows}{" "}
+                  videos; error {m.temporalValidation.holdoutMAE}, baseline{" "}
+                  {m.temporalValidation.baselineMAE} percentage points. Cutoff:{" "}
+                  {m.temporalValidation.cutoff}.
+                </p>
+              )}
               <p>{m.limitations}</p>
             </details>
           </article>
@@ -3200,6 +3311,29 @@ function SourcesPage() {
             Instagram can include <code>shares</code> and <code>saves</code>.
             Add <code>channel_id</code> when combining channels.
           </p>
+          <p>
+            For video-specific learning, add <code>transcript</code> and either
+            <code>average_percentage_viewed</code>, or{" "}
+            <code>duration_seconds</code>
+            with <code>average_view_duration_seconds</code>. YouTube exports can
+            use average view duration in <code>hh:mm:ss</code> format. We train
+            a separate private watch-time reference when at least 20 valid
+            records and 8 content/channel groups are available. Replays may
+            exceed 100%.
+          </p>
+          <p className="fine-print">
+            Likes and viewing metrics are training outcomes, never inputs to
+            predict a new post. Duplicate video/post IDs are counted once. Your
+            exports remain private; creator API accounts are not connected.
+          </p>
+          <div className="actions">
+            <a className="text-button" href="/templates/instagram.csv" download>
+              <Download size={14} /> Instagram CSV template
+            </a>
+            <a className="text-button" href="/templates/youtube.csv" download>
+              <Download size={14} /> YouTube CSV template
+            </a>
+          </div>
           <div className="actions">
             <a
               className="text-button"
@@ -3290,6 +3424,12 @@ function SourcesPage() {
                     : "Did not beat the baseline; score adjustments are disabled."}{" "}
                   Holdout error: {m.holdoutMAE} percentage points.
                 </p>
+                <p>
+                  {m.duplicatesSkipped || 0} duplicate records removed.
+                  {m.watchValidation
+                    ? ` ${m.watchRows} watch-time records trained; error ${m.watchValidation.holdoutMAE}, baseline ${m.watchValidation.baselineMAE} percentage points.`
+                    : " No separate watch-time model trained."}
+                </p>
               </div>
               <button
                 className="icon-button"
@@ -3312,6 +3452,11 @@ function SourcesPage() {
               {s.file} <ArrowUpRight size={13} />
             </a>
             <span>{s.rows} source rows · SHA-256 verified</span>
+            <p>
+              {s.label} · {s.license}
+            </p>
+            <p className="fine-print">{s.processing}</p>
+            {"citation" in s && <p className="fine-print">{s.citation}</p>}
           </div>
         ))}
       </details>

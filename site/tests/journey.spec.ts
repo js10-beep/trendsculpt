@@ -275,6 +275,89 @@ test("brands can update preferences and train/delete a private dataset", async (
     .click();
   await expect(page.getByText("Instagram · 30 records")).toHaveCount(0);
 });
+test("creator transcripts and watch metrics train privately and short-video references remain separate", async ({
+  page,
+}) => {
+  await signup(page, "Analytics Creator");
+  await page.getByRole("link", { name: "Data & models", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "Kuaishou reference", exact: true }),
+  ).toBeVisible();
+  const sourceResponse = await page.request.get("/api/sources");
+  const sources = await sourceResponse.json();
+  expect(sources.models.find((m: any) => m.platform === "YouTube").rows).toBe(
+    30000,
+  );
+  expect(
+    sources.models.find((m: any) => m.platform === "YouTube").temporalValidation
+      .beatsBaseline,
+  ).toBe(true);
+  const template = await page.request.get("/templates/youtube.csv");
+  expect(template.status()).toBe(200);
+  expect(await template.text()).toContain("average_percentage_viewed");
+  await page.getByLabel("Dataset platform").selectOption("YouTube");
+  await page
+    .getByLabel("CSV dataset")
+    .setInputFiles("tests/fixtures/synthetic-creator-watch.csv");
+  await page.getByLabel("I have permission to use these records.").check();
+  await page.getByRole("button", { name: "Train my private model" }).click();
+  await expect(page.getByText("YouTube · 40 records")).toBeVisible();
+  await expect(page.getByText(/40 watch-time records trained/)).toBeVisible();
+  await page
+    .getByRole("link", { name: "Analyze content", exact: true })
+    .click();
+  await page.getByLabel("Where will it live?").selectOption("YouTube Shorts");
+  await page.getByRole("button", { name: "Video", exact: true }).click();
+  await page
+    .getByLabel("Upload media")
+    .setInputFiles("tests/fixtures/watch-reference.mp4");
+  await page
+    .getByLabel("Transcript / subtitles (optional)", { exact: true })
+    .fill(
+      "0:00 Mix 50 grams of flour with water.\n0:07 Feed your sourdough starter every day.",
+    );
+  await expect(page.locator(".media-preview video")).toBeVisible();
+  await page.getByRole("button", { name: "Analyze my content" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Watch-time content comparison." }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Short-video watch-time context." }),
+  ).toBeVisible();
+  await expect(page.locator(".creator-watch-evidence")).toContainText("40");
+  await expect(page.locator(".watch-reference")).toContainText(
+    "does not change your score",
+  );
+  await expect(
+    page.getByText("Test this opening against your own watch-time history", {
+      exact: true,
+    }),
+  ).toBeVisible();
+  await page
+    .getByRole("button", { name: "Save analysis", exact: true })
+    .click();
+  await page.reload();
+  await expect(
+    page.getByRole("heading", { name: "Watch-time content comparison." }),
+  ).toBeVisible();
+  await page.screenshot({
+    path: "/tmp/trendsculpt-watch-evidence.png",
+    fullPage: true,
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBeTruthy();
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await page.getByRole("link", { name: "Data & models", exact: true }).click();
+  await page.getByRole("button", { name: "Delete YouTube dataset" }).click();
+  await page
+    .getByRole("button", { name: "Delete dataset", exact: true })
+    .click();
+  await expect(page.getByText("YouTube · 40 records")).toHaveCount(0);
+});
 test("long-form video uploads get grounded chapters and saved frame evidence", async ({
   page,
 }) => {

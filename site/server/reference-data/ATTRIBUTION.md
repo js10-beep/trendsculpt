@@ -1,0 +1,9 @@
+# Reference data and trained assets
+
+YouTube sample: Rishav Sharma, YouTube Trending Video Dataset, Kaggle version 1346 (2024-04-15), India and US snapshots, CC0 1.0. We deduplicate video IDs, retain the first eligible observation and select 30,000 IDs by SHA-256 order. This sample replaces the 2018 YouTube archive. The source contains no verified Shorts label or viewer-retention metric.
+
+KuaiRand: Gao et al., *KuaiRand: An Unbiased Sequential Recommendation Dataset with Randomly Exposed Videos*, CIKM 2022, DOI 10.1145/3511808.3557624. Original: https://github.com/chongminggao/KuaiRand. Downloaded random-exposure 1K log mirror: https://huggingface.co/datasets/numberbeat6/kuairand/tree/b86438794b71ac3ebb95d96e167f52d22edccda7. Original licence: CC BY-SA 4.0, reproduced in KuaiRand-LICENSE.txt. We retain 5–180 second video groups with at least three exposures, cap per-exposure watch fraction at 3× and aggregate by a hashed video group. No user identifiers are redistributed. The KuaiRand-derived aggregates and model parameters in the bundled artifact are distributed under CC BY-SA 4.0; these terms apply to that component, not unrelated application code or data.
+
+Existing Instagram sample: Aman Kharwal public Website-data sample, 176 observations, pinned original commit and upstream SHA-256 in source-manifest.json. No duplicated notebook posts were added.
+
+The manifest records upstream download digests, source versions, exact derived-data digests and transformations. models.joblib is locally generated with the pinned Python dependencies; artifact-manifest.json records its SHA-256. No downloaded model pickle is executed. acquire_public_samples.py verifies both upstream and derived snapshots. train_public_models.py can retrain from bundled compressed tables without network access. prepare_models.py installs the verified trained artifact without download or training.

@@ -132,7 +132,7 @@ def main():
     visit(raw.get("suites", []))
     health_path = pathlib.Path("/tmp/trendsculpt-live-health.json")
     health = json.loads(health_path.read_text()) if health_path.exists() else {}
-    passed = len(tests) == 8 and all(
+    passed = len(tests) == 9 and all(
         t["status"] in {"expected", "flaky"} for t in tests
     )
     summary = {
@@ -148,6 +148,7 @@ def main():
                 "hostedStorage",
                 "emailDelivery",
                 "deploymentRevision",
+                "modelVersion",
             ]
         },
         "tests": tests,
