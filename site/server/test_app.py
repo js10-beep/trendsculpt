@@ -58,6 +58,69 @@ class WorkflowTests(unittest.TestCase):
         body.update(extra)
         return client.post("/api/analyze", json=body)
 
+    def test_visual_results_are_owner_bound_and_preserved_in_revisions(self):
+        self.assertEqual(
+            self.a.get("/vision/coco-ssd-v1/model.json").headers["cache-control"],
+            "public, max-age=31536000, immutable",
+        )
+        self.account(self.a)
+        self.account(self.b, "two@example.com")
+        raw = (
+            pathlib.Path(__file__).resolve().parents[1]
+            / "tests/fixtures/visual-objects.mp4"
+        ).read_bytes()
+        response = self.analyze(
+            self.a,
+            type="Video",
+            text="A dog demonstration",
+            transcript="0:00 Keep the dog in view while explaining the step.",
+            media="data:video/mp4;base64," + base64.b64encode(raw).decode(),
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        report = response.json()
+        path = "/api/reports/" + report["id"] + "/vision"
+        payload = {
+            "model": "coco-ssdlite-mobilenet-v2-v1",
+            "frames": [
+                {
+                    "timestamp": 0,
+                    "objects": [
+                        {
+                            "label": "dog",
+                            "confidence": 0.92,
+                            "box": [0.3, 0.3, 0.2, 0.3],
+                        }
+                    ],
+                }
+            ],
+        }
+        self.assertEqual(self.b.post(path, json=payload).status_code, 404)
+        usage = self.a.get("/api/usage").json()["count"]
+        updated = self.a.post(path, json=payload)
+        self.assertEqual(updated.status_code, 200, updated.text)
+        self.assertEqual(updated.json()["overallScore"], report["overallScore"])
+        self.assertEqual(updated.json()["visualReview"]["subjects"], ["dog"])
+        again = self.a.post(path, json=payload)
+        self.assertEqual(again.json(), updated.json())
+        self.assertEqual(self.a.get("/api/usage").json()["count"], usage)
+        loaded = self.a.get("/api/reports/" + report["id"]).json()
+        self.assertEqual(loaded["visualReview"], updated.json()["visualReview"])
+        revision = self.analyze(
+            self.a,
+            type="Video",
+            sourceReportId=report["id"],
+            text="Keep your dog visible",
+            applied=True,
+        )
+        self.assertEqual(revision.status_code, 200, revision.text)
+        self.assertEqual(revision.json()["visualReview"]["subjects"], ["dog"])
+        payload["frames"][0]["timestamp"] = 123
+        self.assertEqual(self.a.post(path, json=payload).status_code, 400)
+        self.assertEqual(
+            self.a.get("/api/reports/" + report["id"]).json()["visualReview"],
+            loaded["visualReview"],
+        )
+
     def test_password_auth_and_protected_sessions(self):
         response = self.a.post(
             "/api/auth/signup",

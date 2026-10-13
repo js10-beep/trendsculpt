@@ -9,6 +9,7 @@ from fastapi.responses import JSONResponse
 from .datasets import train_private_csv
 from .analysis import analyze_content, inspect_media, MODELS
 from .content_review import LONG_FORM, parse_transcript
+from .visual_review import VisualPayload, attach_visual_review
 from .storage import db, initialize, STORAGE
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -206,6 +207,7 @@ def health():
             "longForm": True,
             "transcript": True,
             "frameOCR": bool(shutil.which("tesseract")),
+            "visualRecognition": "browser COCO-SSD; 80 object classes; opt-in",
             "maximumMinutes": 60,
             "maximumLongFormMB": 50,
         },
@@ -471,6 +473,7 @@ def validate_content(data):
 
 
 def complete_analysis(data, owner_id, raw, mime, stats):
+    source_report = None
     if data.get("sourceReportId"):
         with db() as c:
             source = c.execute(
@@ -479,6 +482,7 @@ def complete_analysis(data, owner_id, raw, mime, stats):
             ).fetchone()
         if not source:
             raise HTTPException(404, "Source report not found in your account.")
+        source_report = json.loads(source["report"])
         if not stats:
             stats = json.loads(source["report"]).get("mediaAnalysis")
     from datetime import datetime, timezone
@@ -504,6 +508,11 @@ def complete_analysis(data, owner_id, raw, mime, stats):
         ).fetchall()
     private_models = {r["platform"]: pickle.loads(r["model"]) for r in private_rows}
     report = analyze_content(data, stats, private_models)
+    if source_report and source_report.get("visualReview"):
+        visual = source_report["visualReview"]
+        report = attach_visual_review(
+            report, {k: visual[k] for k in ["model", "frames"]}
+        )
     report["media"] = "/api/media/" + report["id"] if raw else None
     with db() as c:
         c.execute(
@@ -644,6 +653,35 @@ def save_report(id: str, request: Request):
     return {"ok": True}
 
 
+@app.post("/api/reports/{id}/vision")
+async def visual_report(id: str, request: Request):
+    owner = session_user(request)
+    rate_limit(request, "vision:" + owner["id"], 20)
+    # Ownership is checked before model payload parsing. Browser estimates are
+    # untrusted data and cannot replace thumbnails, private evidence or scores.
+    with db() as c:
+        row = c.execute(
+            "SELECT report FROM reports WHERE id=? AND user_id=?", (id, owner["id"])
+        ).fetchone()
+    if not row:
+        raise HTTPException(404, "Report not found in your account.")
+    try:
+        payload = VisualPayload.model_validate(await json_object(request)).model_dump()
+        report = attach_visual_review(json.loads(row["report"]), payload)
+    except (ValidationError, ValueError):
+        raise HTTPException(
+            400, "Use valid visual detections from this report’s sampled frames."
+        )
+    with db() as c:
+        result = c.execute(
+            "UPDATE reports SET report=? WHERE id=? AND user_id=?",
+            (json.dumps(report), id, owner["id"]),
+        )
+        if result.rowcount != 1:
+            raise HTTPException(404, "Report not found in your account.")
+    return report
+
+
 @app.delete("/api/reports/{id}")
 def remove_report(id: str, request: Request):
     owner = session_user(request)
@@ -695,7 +733,7 @@ def sources():
             "kaggle": "Pinned YouTube dataset version 1346 bundled; no live refresh",
             "youtubeAPI": "Not connected; API key required",
         },
-        "visualPipeline": "Pillow + FFmpeg actual pixel and frame measurements",
+        "visualPipeline": "Pillow + FFmpeg measurements; optional browser COCO-SSD object recognition",
     }
 
 
@@ -766,6 +804,13 @@ def website(path: str):
     if not candidate.is_relative_to(dist):
         raise HTTPException(404, "Page not found.")
     if candidate.is_file():
+        if path.startswith(("vision/coco-ssd-v1/", "vision/tfjs-wasm-4.22.0/")):
+            # Versioned public artifacts can be reused across reviews. Private
+            # API reports and media retain the middleware's no-store policy.
+            return FileResponse(
+                candidate,
+                headers={"Cache-Control": "public, max-age=31536000, immutable"},
+            )
         return FileResponse(candidate)
     if (dist / "index.html").exists():
         return FileResponse(dist / "index.html")

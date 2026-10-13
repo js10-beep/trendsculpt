@@ -47,6 +47,7 @@ import {
   FlaskConical,
 } from "lucide-react";
 import { analyze, contentAnalysisService, Input, Report } from "./engine";
+import { VisualRecognitionPanel } from "./VisualRecognitionPanel";
 import {
   api,
   User,
@@ -539,7 +540,7 @@ const FAQs = [
   ],
   [
     "What can I analyze?",
-    "Text, captions, images, and MP4 videos. Video reviews use supplied transcripts or SRT/VTT subtitles, English on-screen text OCR, sampled frames and audio levels. Long-form YouTube supports videos up to 60 minutes / 50 MB, or full transcript reviews. Automatic speech transcription and visual-subject recognition are not connected.",
+    "Text, captions, images, and MP4 videos. Video reviews use supplied transcripts or SRT/VTT subtitles, English on-screen text OCR, sampled frames and audio levels. Optional browser visual recognition identifies people and 80 common object classes, with inspectable frame boxes and framing suggestions. Long-form YouTube supports videos up to 60 minutes / 50 MB, or full transcript reviews. Automatic speech transcription, complex action recognition and story understanding are not connected.",
   ],
   [
     "Does it guarantee engagement?",
@@ -1619,11 +1620,15 @@ function AnalyzePage() {
   const [fileBusy, setFileBusy] = useState(false);
   const [drag, setDrag] = useState(false);
   const [videoFile, setVideoFile] = useState<File | null>(null);
+  const [includeVision, setIncludeVision] = useState(false);
+  const [visionProgress, setVisionProgress] = useState("");
+  const visionAbort = useRef<AbortController | null>(null);
   const objectURL = useRef("");
   const longForm = input.platform === LONG_FORM;
   useEffect(
     () => () => {
       if (objectURL.current) URL.revokeObjectURL(objectURL.current);
+      visionAbort.current?.abort();
     },
     [],
   );
@@ -1737,10 +1742,32 @@ function AnalyzePage() {
     setBusy(true);
     const timer = setInterval(() => setPhase((p) => Math.min(p + 1, 4)), 350);
     try {
-      const r =
+      let r =
         videoFile && longForm
           ? await runVideoAnalysis(input, videoFile)
           : await contentAnalysisService.analyze(input);
+
+      if (
+        includeVision &&
+        input.type === "Video" &&
+        r.mediaAnalysis?.timeline?.length
+      ) {
+        const controller = new AbortController();
+        visionAbort.current = controller;
+        try {
+          const { recognizeVideo } = await import("./vision");
+          r = await recognizeVideo(r, setVisionProgress, controller.signal);
+        } catch (e) {
+          toast(
+            controller.signal.aborted
+              ? "Visual review stopped. Your existing video review is ready."
+              : err(e),
+          );
+        } finally {
+          visionAbort.current = null;
+          setVisionProgress("");
+        }
+      }
 
       refresh().catch(() =>
         toast(
@@ -1895,7 +1922,9 @@ function AnalyzePage() {
               <p className="fine-print">
                 Transcripts are reviewed as supplied. English overlay text and
                 visual/audio measurements come from the file. The app does not
-                automatically transcribe speech or identify visual subjects.
+                automatically transcribe speech. Optional visual recognition
+                identifies people and common objects in sampled frames; it does
+                not recognize complex actions.
               </p>
             </>
           )}
@@ -2043,6 +2072,24 @@ function AnalyzePage() {
               {error}
             </p>
           )}
+          {input.type === "Video" && (
+            <div className="vision-choice">
+              <label className="check-label">
+                <input
+                  type="checkbox"
+                  checked={includeVision}
+                  onChange={(e) => setIncludeVision(e.target.checked)}
+                />
+                Include visual subject recognition
+              </label>
+              <p className="fine-print">
+                Recognize people and common objects in sampled frames on this
+                device. First use downloads about 19 MB of model files.
+                Optional; you can also run it from the report. Complex actions
+                and storytelling are not recognized.
+              </p>
+            </div>
+          )}
           <button disabled={busy || fileBusy} className="button full">
             <Sparkles size={18} />
             {busy ? "Finding your creative edge…" : "Analyze my content"}
@@ -2098,7 +2145,7 @@ function AnalyzePage() {
               <Sparkles size={40} />
             </div>
             <span className="eyebrow">INTELLIGENCE IN PROGRESS</span>
-            <h2>{phases[phase]}…</h2>
+            <h2>{visionProgress || `${phases[phase]}…`}</h2>
             <div className="processing-steps">
               {phases.map((p, i) => (
                 <span key={p} className={i <= phase ? "active" : ""}>
@@ -2112,6 +2159,15 @@ function AnalyzePage() {
               ))}
             </div>
             <p>Your creativity is the starting point.</p>
+            {visionProgress && (
+              <button
+                type="button"
+                className="text-button"
+                onClick={() => visionAbort.current?.abort()}
+              >
+                Skip visual recognition
+              </button>
+            )}
           </div>
         </div>
       )}
@@ -2333,6 +2389,13 @@ function ReportPage() {
         </article>
       </div>
       <EvidencePanel report={report} />
+      <VisualRecognitionPanel
+        report={report}
+        onUpdate={(updated) => {
+          setReport(updated);
+          refresh().catch(() => {});
+        }}
+      />
       <VideoReview
         key={report.id}
         report={report}

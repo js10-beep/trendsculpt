@@ -152,9 +152,12 @@ def _inspect(raw, mime, long_form, path, directory):
                 measurement.update(width=width, height=height)
                 frames.append(measurement)
                 preview = image.convert("RGB")
-                preview.thumbnail((320, 240))
+                # Object recognition loses important detail in 320px / low-
+                # quality previews. These remain bounded small samples, rather
+                # than storing full-resolution frames or long-form originals.
+                preview.thumbnail((640, 480))
                 buffer = io.BytesIO()
-                preview.save(buffer, "JPEG", quality=65)
+                preview.save(buffer, "JPEG", quality=85)
                 entry = {
                     k: measurement[k]
                     for k in ["brightness", "contrast", "clippedPercent"]
@@ -279,6 +282,6 @@ def _inspect(raw, mime, long_form, path, directory):
             if mime.startswith("image/")
             else "FFmpeg timeline samples + English frame OCR + sampled audio levels"
         ),
-        limits="Sparse samples measure pixels and audio levels. OCR estimates English on-screen words. Spoken words use your supplied transcript; visual subjects and audience retention are not inferred.",
+        limits="Sparse samples measure pixels and audio levels. OCR estimates English on-screen words. Spoken words use your supplied transcript. Object recognition is a separate optional browser review; audience retention is not measured.",
     )
     return result

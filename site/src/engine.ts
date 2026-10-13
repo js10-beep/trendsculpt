@@ -1,4 +1,5 @@
 import { runAnalysis } from "./store";
+import type { VisualReview } from "./vision";
 export type Input = {
   text: string;
   type: string;
@@ -27,6 +28,7 @@ export type Recommendation = {
   priority?: string;
 };
 export type Report = Input & {
+  visualReview?: VisualReview | null;
   id: string;
   title: string;
   createdAt: string;

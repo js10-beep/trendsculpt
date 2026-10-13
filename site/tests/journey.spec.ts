@@ -421,6 +421,22 @@ test("long-form video uploads get grounded chapters and saved frame evidence", a
   await expect(
     page.getByAltText("Video sample at 0:00", { exact: true }),
   ).toBeVisible();
+  const longVisualResponse = page.waitForResponse(
+    (r) =>
+      /\/api\/reports\/[^/]+\/vision$/.test(r.url()) &&
+      r.request().method() === "POST",
+    { timeout: 90000 },
+  );
+  await page.getByRole("button", { name: "Analyze visible subjects" }).click();
+  const longVisual = await longVisualResponse;
+  expect(longVisual.status()).toBe(200);
+  const longReport = await longVisual.json();
+  expect(longReport.media).toBeNull();
+  expect(longReport.visualReview.frames.length).toBeLessThanOrEqual(8);
+  expect(longReport.visualReview.frames.at(-1).timestamp).toBeGreaterThan(180);
+  await expect(
+    page.getByRole("button", { name: "Run visual review again" }),
+  ).toBeVisible();
   await page.screenshot({
     path: "/tmp/trendsculpt-long-form-report.png",
     fullPage: true,
@@ -550,4 +566,109 @@ test("shared-browser history cannot reveal another account’s report", async ({
   expect(
     (await page.request.delete("/api/reports/" + otherReportId)).status(),
   ).toBe(404);
+});
+
+test("real browser vision recognizes video subjects, persists evidence and handles model failures", async ({
+  page,
+}) => {
+  test.setTimeout(240000);
+  const errors: string[] = [];
+  const externalRequests: string[] = [];
+  const expectedOrigin = new URL(
+    process.env.TRENDSCULPT_TEST_URL || "http://127.0.0.1:5174",
+  ).origin;
+  page.on("pageerror", (e) => errors.push(e.message));
+  page.on("request", (request) => {
+    const url = new URL(request.url());
+    if (url.protocol.startsWith("http") && url.origin !== expectedOrigin)
+      externalRequests.push(url.origin);
+  });
+  await signup(page, "Visual Creator");
+  await page.getByRole("link", { name: "Analyze new content" }).click();
+  await page.getByRole("button", { name: "Video", exact: true }).click();
+  await page
+    .getByLabel("Upload media")
+    .setInputFiles("tests/fixtures/visual-objects.mp4");
+  await page
+    .getByLabel("Caption / content context (optional)", { exact: true })
+    .fill(
+      "A dog beside a bicycle: keep the dog visible when explaining the example.",
+      { timeout: 5000 },
+    );
+  await page
+    .getByLabel("Transcript / subtitles (optional)", { exact: true })
+    .fill(
+      "WEBVTT\n\n00:00.000 --> 00:06.000\nKeep the dog in view while you explain this step.",
+    );
+  await expect(
+    page.getByLabel("Include visual subject recognition"),
+  ).not.toBeChecked();
+  await page.getByLabel("Include visual subject recognition").check();
+  const visionResponse = page.waitForResponse(
+    (r) =>
+      /\/api\/reports\/[^/]+\/vision$/.test(r.url()) &&
+      r.request().method() === "POST",
+    { timeout: 180000 },
+  );
+  await page.getByRole("button", { name: "Analyze my content" }).click();
+  const response = await visionResponse;
+  expect(response.status()).toBe(200);
+  const report = await response.json();
+  expect(report.visualReview.model).toBe("coco-ssdlite-mobilenet-v2-v1");
+  expect(report.visualReview.subjects).toContain("dog");
+  expect(report.visualReview.subjects).toContain("bicycle");
+  expect(report.visualReview.frames.length).toBeGreaterThan(1);
+  const dogFeedback = report.recommendations.find(
+    (r: any) =>
+      r.source === "Browser visual recognition" && r.reason.includes("a dog"),
+  );
+  expect(dogFeedback.quote).toContain("Keep the dog in view");
+  expect(dogFeedback.timestamp).toBeGreaterThanOrEqual(0);
+  await expect(
+    page.getByRole("heading", { name: "Look beyond the words." }),
+  ).toBeVisible();
+  await expect(page.locator(".object-box").first()).toBeVisible();
+  await expect(page.locator(".recognized-objects")).toContainText("dog");
+  await page
+    .getByRole("button", { name: "Save analysis", exact: true })
+    .click();
+  await page.reload();
+  await expect(page.locator(".recognized-objects")).toContainText("dog");
+  await expect(
+    page.getByRole("button", { name: "Saved to library" }),
+  ).toBeDisabled();
+  await page
+    .locator(".visual-recognition")
+    .screenshot({ path: "/tmp/trendsculpt-visual-recognition.png" });
+  // Real failure path: a blocked model fetch must preserve the prior evidence.
+  await page.route("**/vision/coco-ssd-v1/model.json", (route) =>
+    route.abort(),
+  );
+  await page.getByRole("button", { name: "Run visual review again" }).click();
+  await expect(page.locator(".visual-recognition [role=alert]")).toContainText(
+    "could not load",
+    { timeout: 30000 },
+  );
+  await expect(page.locator(".recognized-objects")).toContainText("dog");
+  await page.unroute("**/vision/coco-ssd-v1/model.json");
+  // Cancellation is checked while the model request is intentionally pending.
+  await page.route("**/vision/coco-ssd-v1/model.json", async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+    await route.continue().catch(() => {});
+  });
+  await page.getByRole("button", { name: "Run visual review again" }).click();
+  await page.getByRole("button", { name: "Cancel visual review" }).click();
+  await expect(
+    page.getByRole("button", { name: "Run visual review again" }),
+  ).toBeEnabled();
+  await expect(page.locator(".recognized-objects")).toContainText("dog");
+  await page.unroute("**/vision/coco-ssd-v1/model.json");
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth + 1,
+    ),
+  ).toBe(true);
+  expect(errors).toEqual([]);
+  expect(externalRequests).toEqual([]);
 });

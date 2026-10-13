@@ -1,0 +1,23 @@
+{
+  "package": "@tensorflow/tfjs-backend-wasm",
+  "version": "4.22.0",
+  "license": "Apache-2.0",
+  "source": "https://www.npmjs.com/package/@tensorflow/tfjs-backend-wasm/v/4.22.0",
+  "files": [
+    {
+      "file": "tfjs-backend-wasm-simd.wasm",
+      "bytes": 424594,
+      "sha256": "77ebb28a6d34f371dbbf2086b7f2de8994acd8ea5a3cf1fa24d2c26c840cac7b"
+    },
+    {
+      "file": "tfjs-backend-wasm-threaded-simd.wasm",
+      "bytes": 435643,
+      "sha256": "c052228d4bef185c27bbe59a9e029570c78bbb9f08b3cb46b597851650373de2"
+    },
+    {
+      "file": "tfjs-backend-wasm.wasm",
+      "bytes": 311123,
+      "sha256": "70a5d516060464e5269f01c74bac1772d6b8ab6cb612acf16b5cdaf61f78d892"
+    }
+  ]
+}

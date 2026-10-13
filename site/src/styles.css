@@ -3773,3 +3773,125 @@ label.checkbox {
     font-size: 26px;
   }
 }
+
+/* Visual evidence uses the exact preview aspect ratio for normalized boxes. */
+.visual-recognition {
+  margin-top: 24px;
+  padding: 28px;
+}
+.visual-recognition h2 {
+  margin: 8px 0;
+  letter-spacing: -0.04em;
+}
+.visual-recognition > p {
+  max-width: 850px;
+  color: var(--muted);
+}
+.visual-recognition .actions {
+  flex-wrap: wrap;
+  margin: 18px 0;
+}
+.vision-choice {
+  margin: 20px 0;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: #f7f9f2;
+}
+.vision-choice .check-label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 600;
+}
+.vision-choice input {
+  width: 17px;
+  height: 17px;
+}
+.vision-choice p {
+  margin: 8px 0 0;
+}
+.vision-progress {
+  padding: 12px 16px;
+  border-radius: 12px;
+  background: #eff8d7;
+}
+.recognized-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
+  align-items: start;
+  gap: 28px;
+  margin: 20px 0;
+}
+.recognized-frame {
+  position: relative;
+  width: 100%;
+  max-width: 480px;
+  overflow: hidden;
+  border-radius: 12px;
+  background: #14201a;
+}
+.recognized-frame img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.object-box {
+  position: absolute;
+  border: 2px solid #c7ff52;
+  box-shadow: 0 0 0 1px #17300b;
+}
+.object-box > span {
+  display: inline-flex;
+  width: 20px;
+  height: 20px;
+  background: #c7ff52;
+  color: #172600;
+  font-size: 12px;
+  font-weight: 800;
+  align-items: center;
+  justify-content: center;
+}
+.recognized-objects {
+  list-style: none;
+  padding: 0;
+  margin: 16px 0;
+}
+.recognized-objects li {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border);
+}
+.recognized-objects li > span:first-child {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  text-transform: capitalize;
+}
+.recognized-objects li b {
+  background: #eff8d7;
+  padding: 3px 8px;
+  border-radius: 6px;
+}
+.recognized-objects li > span:last-child {
+  color: var(--muted);
+  font-size: 13px;
+}
+@media (max-width: 800px) {
+  .visual-recognition {
+    padding: 20px;
+  }
+  .visual-recognition > .card-heading {
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  .recognized-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .recognized-objects li {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+}
