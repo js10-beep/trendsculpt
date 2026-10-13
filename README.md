@@ -2,7 +2,7 @@
 
 Status: PASS
 
-[Workflow details](https://github.com/js10-beep/trendsculpt/actions/runs/38027982426)
+[Workflow details](https://github.com/js10-beep/trendsculpt/actions/runs/38366895658)
 
 Target: https://trendsculpt.onrender.com
 
@@ -17,5 +17,6 @@ Target: https://trendsculpt.onrender.com
 | long-form transcript reviews reject bad timing and keep untimed chapters honest | expected |
 | public routes, source ledger and tablet layout stay usable | expected |
 | shared-browser history cannot reveal another account’s report | expected |
+| real browser vision recognizes video subjects, persists evidence and handles model failures | expected |
 
 Only credential-free check results are published here.
